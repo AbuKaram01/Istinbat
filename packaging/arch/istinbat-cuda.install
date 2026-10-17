@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+post_install() {
+    /opt/istinbat/setup-venv.sh cuda
+}
+
+post_upgrade() {
+    post_install
+}
+
+pre_remove() {
+    rm -rf /opt/istinbat/venv
+}

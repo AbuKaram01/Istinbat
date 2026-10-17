@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Maintainer: AbuKaram01 <AbuKaram01@users.noreply.github.com>
+#
+# Two packages from one source: istinbat (CPU) and istinbat-cuda (GPU-accelerated).
+#
+# Local builds: packaging/build-arch.sh makes the source tarball from your checkout and runs
+# makepkg here. For the AUR, tag a release on GitHub, replace 'SKIP' with the tarball's
+# sha256 (makepkg -g) and generate .SRCINFO with: makepkg --printsrcinfo > .SRCINFO
+
+pkgbase=istinbat
+pkgname=('istinbat' 'istinbat-cuda')
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Ask questions about your Arabic and English books, fully offline'
+arch=('any')
+url='https://github.com/AbuKaram01/istinbat'
+license=('AGPL-3.0-or-later')
+makedepends=('python')
+source=("$pkgbase-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+# Runtime dependencies shared by both variants. Python packages that are not in the
+# repositories are installed into a virtual environment by the install hook.
+_common_depends=(
+    'python' 'python-pip' 'python-gobject' 'gtk4' 'libadwaita' 'librsvg'
+    'adwaita-icon-theme' 'gcc' 'make' 'cmake'
+)
+
+check() {
+    cd "$pkgbase-$pkgver"
+    python -m compileall -q src
+}
+
+_install_payload() {
+    local source_dir="$srcdir/$pkgbase-$pkgver"
+    local app_id='io.github.AbuKaram01.Istinbat'
+
+    install -d "$pkgdir/opt/istinbat/src"
+    cp -r "$source_dir/src" "$source_dir/pyproject.toml" "$source_dir/LICENSE" "$source_dir/README.md" \
+        "$pkgdir/opt/istinbat/src/"
+    find "$pkgdir/opt/istinbat/src" -name '__pycache__' -type d -prune -exec rm -rf {} +
+    install -Dm755 "$startdir/setup-venv.sh" "$pkgdir/opt/istinbat/setup-venv.sh"
+
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/istinbat" <<'LAUNCHER'
+#!/bin/sh
+exec /opt/istinbat/venv/bin/python3 -m istinbat "$@"
+LAUNCHER
+
+    install -Dm644 "$source_dir/data/$app_id.desktop" "$pkgdir/usr/share/applications/$app_id.desktop"
+    install -Dm644 "$source_dir/data/icons/hicolor/scalable/apps/$app_id.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
+    install -Dm644 "$source_dir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+package_istinbat() {
+    pkgdesc+=' (CPU)'
+    depends=("${_common_depends[@]}" 'python-pytorch')
+    conflicts=('istinbat-cuda')
+    install=istinbat.install
+    _install_payload
+}
+
+package_istinbat-cuda() {
+    pkgdesc+=' (CUDA-accelerated)'
+    depends=("${_common_depends[@]}" 'python-pytorch-cuda' 'cuda')
+    conflicts=('istinbat')
+    install=istinbat-cuda.install
+    _install_payload
+}

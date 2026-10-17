@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Istinbat
+Name[ar]=استنباط
+Comment=Ask questions about your Arabic books, fully offline
+Comment[ar]=اسأل عن كتبك العربية دون اتصال بالإنترنت
+Exec=istinbat
+Icon=io.github.AbuKaram01.Istinbat
+Terminal=false
+Categories=Education;Literature;
+Keywords=books;arabic;questions;search;offline;
+StartupNotify=true

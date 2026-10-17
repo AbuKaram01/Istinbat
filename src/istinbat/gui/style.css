@@ -1,0 +1,81 @@
+/* Only what libadwaita's built-in style classes cannot express. Colors come from
+   libadwaita's named colors, so light, dark and accent colors follow the system. */
+
+.user-bubble {
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+  border-radius: 16px;
+  padding: 10px 16px;
+}
+
+.answer-card {
+  padding: 14px 18px;
+}
+
+.source-snippet {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background-color: alpha(currentColor, 0.06);
+}
+
+.status-badge {
+  background-color: alpha(currentColor, 0.12);
+  border-radius: 12px;
+  padding: 2px 12px;
+  font-weight: bold;
+}
+
+/* -- Markdown ---------------------------------------------------------------- */
+
+.user-bubble label {
+  color: @accent_fg_color;
+}
+
+.user-bubble link {
+  color: @accent_fg_color;
+  text-decoration: underline;
+}
+
+.md-code {
+  background-color: alpha(currentColor, 0.07);
+  border-radius: 8px;
+  padding: 6px 10px 10px 10px;
+}
+
+.user-bubble .md-code {
+  background-color: alpha(@accent_fg_color, 0.18);
+}
+
+.md-quote:dir(ltr) {
+  border-left: 3px solid alpha(currentColor, 0.3);
+  padding-left: 12px;
+}
+
+.md-quote:dir(rtl) {
+  border-right: 3px solid alpha(currentColor, 0.3);
+  padding-right: 12px;
+}
+
+.md-table {
+  border: 1px solid alpha(currentColor, 0.18);
+  border-radius: 6px;
+}
+
+.md-cell {
+  padding: 6px 12px;
+  border: 1px solid alpha(currentColor, 0.12);
+}
+
+.md-cell-header {
+  background-color: alpha(currentColor, 0.06);
+}
+
+.message-frame {
+  border-radius: 14px;
+  background-color: @card_bg_color;
+}
+
+.message-input,
+.message-input text {
+  background: transparent;
+}

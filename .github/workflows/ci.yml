@@ -1,0 +1,163 @@
+# SPDX-FileCopyrightText: 2026 AbuKaram01
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:        # Actions > CI > Run workflow: runs only windows-full-install (below).
+
+jobs:
+  linux:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 xvfb adwaita-icon-theme
+      - name: Python environment
+        run: |
+          python3 -m venv --system-site-packages .venv
+          .venv/bin/pip install numpy rank-bm25 markdown-it-py pytest ruff
+          .venv/bin/pip install --no-deps -e .
+      - run: .venv/bin/ruff check .
+      - run: GSK_RENDERER=cairo xvfb-run -a .venv/bin/pytest -q
+
+  # The engine, storage, paths and the Windows support code, without GTK: catches path, encoding and
+  # file-locking mistakes on a real Windows file system. The GUI tests skip themselves here.
+  windows-core:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy rank-bm25 markdown-it-py pytest ruff
+      - run: pip install --no-deps -e .
+      - run: ruff check .
+      - run: pytest -q
+
+  # The real thing: installs the GTK runtime with scripts/install-windows.ps1 (heavy packages skipped) and runs
+  # the whole suite, GUI tests included, against GTK 4 and libadwaita on Windows. The Python version has to be
+  # the one the gvsbuild PyGObject wheel was built for (3.14 in release 2026.8.0); if this job fails with
+  # "do not match Python", change it.
+  windows-gtk:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install GTK and the Python environment
+        shell: pwsh
+        run: ./scripts/install-windows.ps1 -SkipHeavy -NoShortcut -PythonVersion ${{ matrix.python }}
+      - name: Test
+        shell: pwsh
+        run: .venv\Scripts\python.exe -m pytest -q
+
+  installer:
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: windows-latest
+    needs: windows-core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build the installer
+        shell: pwsh
+        run: ./packaging/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: istinbat-windows-setup
+          path: packaging/dist/*.exe
+
+  # Manual only (several minutes of Windows time, so it never runs on a push). The complete installation with
+  # nothing skipped: PyTorch, llama-cpp-python (prebuilt wheel or compiled), the Start menu entry; then it checks
+  # the heavy libraries import, and launches the application the way the Start menu entry does (pythonw.exe,
+  # with and without the software renderer), keeping a screenshot of each.
+  windows-full-install:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install everything
+        id: install
+        shell: pwsh
+        run: ./scripts/install-windows.ps1 -PythonVersion 3.14
+      - name: The heavy libraries import
+        shell: pwsh
+        run: >
+          .venv\Scripts\python.exe -c "import sys, torch, llama_cpp, chromadb, sentence_transformers;
+          print('python', sys.version); print('torch', torch.__version__, 'cuda', torch.cuda.is_available());
+          print('llama-cpp-python', llama_cpp.__version__); print('chromadb', chromadb.__version__);
+          print('sentence-transformers', sentence_transformers.__version__)"
+      - name: The Start menu entry points at something that exists
+        shell: pwsh
+        run: |
+          $link = Join-Path ([Environment]::GetFolderPath('Programs')) 'Istinbat.lnk'
+          if (-not (Test-Path $link)) { throw "Start menu entry missing: $link" }
+          $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($link)
+          "Target:    $($shortcut.TargetPath)"
+          "Arguments: $($shortcut.Arguments)"
+          "Icon:      $($shortcut.IconLocation)"
+          if (-not (Test-Path $shortcut.TargetPath)) { throw 'The shortcut target does not exist.' }
+      - name: Test suite with the real libraries installed
+        shell: pwsh
+        run: |
+          .venv\Scripts\python.exe -m pip install --quiet pytest
+          .venv\Scripts\python.exe -m pytest -q
+      - name: Launch the application
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force screenshots | Out-Null
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $python = (Resolve-Path .venv\Scripts\pythonw.exe).Path
+          $failed = $false
+          foreach ($renderer in 'default', 'cairo') {
+              if ($renderer -eq 'cairo') { $env:GSK_RENDERER = 'cairo' } else { Remove-Item Env:GSK_RENDERER -ErrorAction SilentlyContinue }
+              $process = Start-Process -FilePath $python -ArgumentList '-m', 'istinbat' -PassThru
+              Start-Sleep -Seconds 20
+              if ($process.HasExited) {
+                  Write-Host "[$renderer] the application exited early with code $($process.ExitCode)"
+                  $failed = $true
+              } else {
+                  Write-Host "[$renderer] the application is still running after 20 seconds"
+              }
+              try {
+                  $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+                  $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+                  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                  $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+                  $bitmap.Save((Join-Path (Get-Location) "screenshots\$renderer.png"))
+              } catch { Write-Host "[$renderer] no screenshot: $($_.Exception.Message)" }
+              # A venv's pythonw.exe starts the real interpreter as a child, so stop the whole process tree;
+              # otherwise the first window would still be on screen during the second launch.
+              if (-not $process.HasExited) { & taskkill /PID $process.Id /T /F | Out-Null }
+              Start-Sleep -Seconds 3
+          }
+          $log = Join-Path $env:LOCALAPPDATA 'istinbat\istinbat.log'
+          if (Test-Path $log) {
+              Copy-Item $log screenshots\istinbat.log
+              Write-Host '--- istinbat.log'
+              Get-Content $log
+          }
+          if ($failed) { exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: launch-screenshots
+          path: screenshots/*
+          if-no-files-found: ignore
