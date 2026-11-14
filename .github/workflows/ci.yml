@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.14"]
+        python: ["3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -95,7 +95,7 @@ jobs:
       - name: Install everything
         id: install
         shell: pwsh
-        run: ./scripts/install-windows.ps1 -PythonVersion 3.14
+        run: ./scripts/install-windows.ps1 -PythonVersion 3.12
       - name: The heavy libraries import
         shell: pwsh
         run: >
