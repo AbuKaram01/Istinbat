@@ -12,6 +12,7 @@ imports.
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import subprocess
 import sys
@@ -26,7 +27,7 @@ _ICON_NAME = "istinbat.ico"
 _CREATE_NO_WINDOW = 0x08000000
 
 
-# -- The GTK runtime ----------------------------------------------------------------------------------
+# --- The GTK runtime ---
 
 def gtk_candidates() -> list[Path]:
     """Folders that may hold a Windows GTK 4 runtime (as produced by gvsbuild), best guess first."""
@@ -44,14 +45,17 @@ def gtk_candidates() -> list[Path]:
 
 
 def is_gtk_runtime(folder: Path) -> bool:
+    """Whether ``folder`` looks like a GTK 4 runtime: it has a ``bin`` folder and the GObject typelibs."""
     return (folder / "bin").is_dir() and (folder / "lib" / "girepository-1.0").is_dir()
 
 
 def find_gtk_runtime() -> Path | None:
+    """The first of ``gtk_candidates()`` that is a GTK runtime, or None when there is none."""
     return next((folder for folder in gtk_candidates() if is_gtk_runtime(folder)), None)
 
 
 def _prepend(variable: str, value: str) -> None:
+    """Put ``value`` at the front of the path-list environment variable ``variable``, unless already in it."""
     current = os.environ.get(variable)
     parts = current.split(os.pathsep) if current else []
     if value not in parts:
@@ -78,7 +82,62 @@ def configure_gtk(gtk: Path) -> None:
         os.environ.setdefault("GSETTINGS_SCHEMA_DIR", str(schemas))
 
 
-# -- Process set-up -----------------------------------------------------------------------------------
+# --- The Visual C++ runtime ---
+
+# Handles of the runtime DLLs loaded by configure_vcruntime(), kept for as long as the process lives.
+_loaded_runtime: list[object] = []
+
+
+def find_vcruntime() -> Path | None:
+    """The folder of Visual C++ runtime DLLs that the installer carries (``vcruntime`` beside the program), if any."""
+    # sys.prefix is <install dir>\.venv, and the DLLs are in <install dir>\vcruntime.
+    folder = Path(sys.prefix).parent / "vcruntime"
+    return folder if folder.is_dir() and any(folder.glob("*.dll")) else None
+
+
+def _load_library(path: Path) -> None:
+    import ctypes
+
+    # Pass the full path: Windows then also looks beside the DLL for the libraries it depends on.
+    _loaded_runtime.append(ctypes.WinDLL(str(path)))
+
+
+def configure_vcruntime(folder: Path) -> list[str]:
+    """Make this process use the Visual C++ runtime DLLs of ``folder`` (``msvcp140.dll``, ``vcomp140.dll`` ...).
+
+    PyTorch, onnxruntime and llama.cpp import ``msvcp140.dll``, which only a computer that has the Visual C++
+    Redistributable has; the installer carries copies. They are loaded here, before any of those libraries is
+    imported: a library loaded later finds a DLL of that name already in the process and uses it, so the copy that
+    came with Istinbat is the one that runs, on a computer with or without the Redistributable (and one with an older
+    Redistributable cannot give a library a runtime that is too old for it).
+
+    The folder is also made known for DLLs that are looked up later and for programs started from here. Python's
+    own ``vcruntime140.dll`` is not part of it: python.exe already has it loaded.
+
+    Returns:
+        The names of the DLLs that were loaded. A DLL that cannot be loaded is skipped, leaving the system to
+        supply it (or not).
+    """
+    add_dll_directory = getattr(os, "add_dll_directory", None)
+    if add_dll_directory is not None:
+        with contextlib.suppress(OSError):
+            add_dll_directory(str(folder))
+    _prepend("PATH", str(folder))
+    loaded: list[str] = []
+    # Sorted by name so that msvcp140.dll is loaded before msvcp140_1.dll.
+    for dll in sorted(folder.glob("*.dll"), key=lambda path: path.name.lower()):
+        if dll.name.lower().startswith("vcruntime"):
+            # python.exe already has its own copy loaded; a second one would be a second C runtime.
+            continue
+        try:
+            _load_library(dll)
+        except OSError:
+            continue
+        loaded.append(dll.name)
+    return loaded
+
+
+# --- Process set-up ---
 
 def ensure_standard_streams() -> None:
     """Give a console-less process (``pythonw.exe``) working ``stdout`` and ``stderr``.
@@ -97,7 +156,7 @@ def ensure_standard_streams() -> None:
 
 
 def set_app_user_model_id() -> None:
-    """Give the process its own taskbar identity instead of sharing python.exe's."""
+    """Give the process its own taskbar identity instead of sharing python.exe's. Errors are ignored."""
     try:
         import ctypes
 
@@ -107,10 +166,16 @@ def set_app_user_model_id() -> None:
 
 
 def prepare_runtime() -> None:
-    """Everything that must happen before GTK is imported. Safe to call more than once."""
+    """Do everything that must happen before GTK is imported; a no-op off Windows.
+
+    Safe to call more than once.
+    """
     if not is_windows():
         return
     ensure_standard_streams()
+    vcruntime = find_vcruntime()
+    if vcruntime is not None:
+        configure_vcruntime(vcruntime)
     gtk = find_gtk_runtime()
     if gtk is not None:
         configure_gtk(gtk)
@@ -135,7 +200,7 @@ def report_missing_toolkit(error: BaseException) -> None:
             pass
 
 
-# -- Icon ---------------------------------------------------------------------------------------------
+# --- Icon ---
 
 def icon_file() -> Path | None:
     """The multi-size ``.ico`` of the application, when it is present (a checkout or an installation)."""
@@ -165,7 +230,10 @@ def apply_icon_to_own_windows() -> None:
             wintypes.HINSTANCE, wintypes.LPCWSTR, wintypes.UINT, ctypes.c_int, ctypes.c_int, wintypes.UINT,
         ]
         user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        # Win32 constants: IMAGE_ICON, LR_LOADFROMFILE and WM_SETICON.
         image_icon, load_from_file, wm_seticon = 1, 0x10, 0x80
+        # GetSystemMetrics indices 11/12 and 49/50 are SM_CXICON/SM_CYICON and SM_CXSMICON/SM_CYSMICON: the
+        # sizes the shell uses for the large (taskbar, Alt+Tab) and the small (title bar) icon.
         big = user32.LoadImageW(None, str(icon), image_icon, user32.GetSystemMetrics(11), user32.GetSystemMetrics(12),
                                 load_from_file)
         small = user32.LoadImageW(None, str(icon), image_icon, user32.GetSystemMetrics(49),
@@ -174,9 +242,11 @@ def apply_icon_to_own_windows() -> None:
 
         @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         def visit(hwnd, _lparam):
+            # EnumWindows callback; returning True continues the enumeration.
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value == own_pid and user32.IsWindowVisible(hwnd):
+                # WM_SETICON's wParam selects the slot: 1 = ICON_BIG, 0 = ICON_SMALL.
                 if big:
                     user32.SendMessageW(hwnd, wm_seticon, 1, big)
                 if small:
@@ -188,7 +258,7 @@ def apply_icon_to_own_windows() -> None:
         pass
 
 
-# -- Notifications ------------------------------------------------------------------------------------
+# --- Notifications ---
 #
 # GLib's Gio.Notification has no Windows backend, so "your answer is ready" would never appear.
 # A toast is raised through Windows PowerShell 5.1 (it ships with Windows 10 and 11 and projects the
@@ -218,7 +288,10 @@ def toast_script(title: str, body: str, app_id: str = APP_ID) -> str:
 
 
 def powershell_command(script: str) -> list[str]:
-    """``powershell.exe`` arguments that run ``script`` without quoting problems (UTF-16LE, base64)."""
+    """The ``powershell.exe`` arguments that run ``script`` without quoting problems.
+
+    The script is passed as base64 of its UTF-16LE bytes, the encoding that ``-EncodedCommand`` expects.
+    """
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     return [
         "powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
@@ -238,7 +311,13 @@ def register_toast_app(display_name: str = "Istinbat") -> None:
 
 
 def send_toast(title: str, body: str) -> bool:
-    """Show a Windows toast. Returns False when it could not even be attempted."""
+    """Show a Windows toast.
+
+    Returns:
+        False when it could not even be attempted (not Windows, the registration failed, or PowerShell could not
+        be started). True only means that the PowerShell process was started; the toast is raised asynchronously
+        and its outcome is not checked.
+    """
     if not is_windows():
         return False
     try:

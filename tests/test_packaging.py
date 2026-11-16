@@ -5,37 +5,20 @@
 
 import os
 import re
-import shutil
 import stat
 import subprocess
-import sys
-from pathlib import Path
 
 import pytest
+from packaging_support import APP_ID, ARCH, ROOT, needs_bash
 
 import istinbat
 
-ROOT = Path(__file__).resolve().parent.parent
-ARCH = ROOT / "packaging" / "arch"
-APP_ID = istinbat.APP_ID
 SCRIPTS = [
     ROOT / "packaging" / "build.sh",
     ROOT / "packaging" / "build-arch.sh",
     ROOT / "packaging" / "arch" / "setup-venv.sh",
     ROOT / "scripts" / "install-debian.sh",
     ROOT / "scripts" / "install-arch.sh",
-]
-
-# The shell scripts and their stubs are POSIX-only (":"-separated PATH, /bin/sh), so they are skipped on Windows.
-needs_bash = pytest.mark.skipif(
-    shutil.which("bash") is None or sys.platform == "win32", reason="needs bash on a POSIX system",
-)
-needs_pwsh = pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 (pwsh) is not available")
-WINDOWS = ROOT / "packaging" / "windows"
-POWERSHELL_SCRIPTS = [
-    ROOT / "scripts" / "install-windows.ps1",
-    ROOT / "scripts" / "uninstall-windows.ps1",
-    ROOT / "packaging" / "build-windows.ps1",
 ]
 
 
@@ -145,67 +128,3 @@ def test_the_two_build_scripts_do_not_delete_each_others_packages():
     for script in ("build.sh", "build-arch.sh"):
         text = (ROOT / "packaging" / script).read_text(encoding="utf-8")
         assert 'rm -rf "$OUT_DIR"' not in text and 'rm -rf "$WORK_DIR" "$OUT_DIR"' not in text, script
-
-
-# -- Windows ------------------------------------------------------------------------------------
-
-def test_the_windows_icon_and_installer_files_exist():
-    assert (ROOT / "data" / "windows" / "istinbat.ico").is_file()
-    assert (WINDOWS / "istinbat.iss").is_file()
-    for script in POWERSHELL_SCRIPTS:
-        assert script.is_file(), script
-
-
-def test_the_installer_script_matches_the_package_version_and_app_id():
-    text = (WINDOWS / "istinbat.iss").read_text(encoding="utf-8")
-    assert f'#define AppVersion "{istinbat.__version__}"' in text
-    assert f'#define AppId "{APP_ID}"' in text
-
-
-def test_the_installer_runs_the_install_script_per_user_and_cleans_up_after_itself():
-    text = (WINDOWS / "istinbat.iss").read_text(encoding="utf-8")
-    assert "PrivilegesRequired=lowest" in text
-    assert "scripts\\install-windows.ps1" in text and "-NoShortcut" in text
-    assert "{localappdata}\\istinbat\\gtk" in text and "{app}\\.venv" in text
-    deletions = [
-        line.lower() for line in text.split("[UninstallDelete]")[1].split("[Code]")[0].splitlines()
-        if line.strip() and not line.startswith(";")
-    ]
-    for kept in ("models", "chroma_db", "conversations", "settings", "documents"):
-        assert not any(kept in line for line in deletions), kept          # User data is never deleted.
-
-
-def test_pygobject_is_not_requested_from_pypi_on_windows():
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert "\"PyGObject; sys_platform != 'win32'\"" in text
-
-
-def test_the_install_script_follows_the_runtime_that_the_application_looks_for():
-    text = (ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
-    assert "'istinbat'" in text and "'gtk'" in text           # %LOCALAPPDATA%\istinbat\gtk, see winsupport.
-    assert "ISTINBAT_GTK_DIR" in text and "Adw-1.typelib" in text and "-m istinbat" in text
-
-
-@needs_pwsh
-@pytest.mark.parametrize("script", POWERSHELL_SCRIPTS, ids=lambda path: path.name)
-def test_every_powershell_script_parses(script, tmp_path):
-    checker = tmp_path / "parse.ps1"
-    checker.write_text(
-        "param($Path)\n"
-        "$errors = $null; $tokens = $null\n"
-        "[System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors) | Out-Null\n"
-        "if ($errors.Count) { $errors | ForEach-Object { Write-Output $_.Message }; exit 1 }\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        ["pwsh", "-NoProfile", "-File", str(checker), str(script)], capture_output=True, text=True, check=False,
-    )
-    assert result.returncode == 0, result.stdout
-
-
-@pytest.mark.parametrize("name", ["install-windows.ps1", "uninstall-windows.ps1"])
-def test_the_windows_scripts_refuse_to_run_elsewhere_with_a_clear_message(name):
-    text = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-    assert "$env:OS -ne 'Windows_NT'" in text and "install-debian.sh" in text
-    # The check has to come before anything that needs Windows.
-    assert text.index("Windows_NT") < text.index("$env:LOCALAPPDATA")

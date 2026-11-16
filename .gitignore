@@ -1,7 +1,63 @@
-.venv/
+# -- Python bytecode and caches ----------------------------------------------------------
 __pycache__/
-*.egg-info/
-build/
-packaging/dist/
+*.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# -- Virtual environments (scripts/install-*.sh and install-windows.ps1 create .venv in the project root) --
+.venv/
+venv/
+env/
+
+# -- Python packaging output ---------------------------------------------------------------
+*.egg-info/
+build/
+/dist/
+*.egg
+.eggs/
+
+# -- Distro packages: output of packaging/build.sh and packaging/build-arch.sh ----------------
+/packaging/work/
+/packaging/dist/
+*.deb
+*.rpm
+*.pkg.tar.*
+
+# Leftovers if makepkg is run by hand inside packaging/arch/
+# (NOT a bare "src/" or "pkg/": that would hide the real source folder)
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.tar.gz
+
+# -- Local models and partial downloads ------------------------------------------------------
+# The application keeps its models in the user's data folder (outside the repository).
+# These only matter if you point the models folder inside the project.
+/models/
+*.gguf
+*.part
+
+# -- Secrets ---------------------------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key
+
+# -- Editors and OS junk ---------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.log
+
+# -- What packaging/build-windows.ps1 prepares for the Windows installer -----------------------
+/packaging/gtk/
+/packaging/python/
+/packaging/wheelhouse/
+/packaging/vcruntime/

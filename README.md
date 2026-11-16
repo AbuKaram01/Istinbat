@@ -2,7 +2,7 @@
 
 Ask questions about your Arabic and English books and get answers drawn from their text, entirely offline.
 
-runs on Linux and on Windows 10/11.
+It runs on Linux and on Windows 10/11.
 
 ## Installation
 
@@ -29,10 +29,24 @@ compiled from source, which takes a few minutes), and add an applications-menu e
 
 ### Windows 10 / 11 (64-bit)
 
+The ready-made installer (`istinbat-<version>-windows-setup.exe`, built by CI and kept as the `istinbat-windows-setup`
+artifact of every run) carries everything the program needs: the GTK 4 and libadwaita runtime, Python 3.14, every
+Python library (PyTorch, ChromaDB, sentence-transformers, llama.cpp ...) and the Visual C++ runtime. It installs for
+your user only, needs no administrator rights and no internet connection; only the models are downloaded later (see
+below). That is why the file is large. Installing over an older version keeps your books, models, index and
+conversations.
+
+From a checkout, a script makes the same installation and downloads the parts that the installer would have carried:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1          # CPU-only PyTorch, prebuilt llama.cpp
-powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Cuda    # CUDA PyTorch, llama.cpp compiled with CUDA
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -Cuda    # llama.cpp compiled with CUDA
+powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1 -TorchIndexUrl https://download.pytorch.org/whl/cu128
+                                                                              # a CUDA build of PyTorch
 ```
+
+Build the installer yourself with `powershell -File packaging\build-windows.ps1` (needs Python 3.14, Inno Setup and
+internet access for the parts it puts inside).
 
 ### Packages
 
