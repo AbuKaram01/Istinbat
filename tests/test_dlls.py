@@ -299,9 +299,58 @@ def test_gtks_command_line_tools_are_counted_but_not_judged(install):
     assert after.vcpp["msvcp140.dll"]["importers"] == before.vcpp["msvcp140.dll"]["importers"]
     assert after.vcpp["vcruntime140.dll"]["unprovided"] == before.vcpp["vcruntime140.dll"]["unprovided"]
     assert any(
-        line.startswith("GTK's 2 command-line tools in gtk\\bin are not started by Istinbat")
+        line.startswith("2 command-line tools (GTK's in gtk\\bin, and the ones that Python libraries carry) are not "
+                        "started by Istinbat")
         for line in dlls.format_report(after)
     )
+
+
+def test_the_programs_that_python_libraries_carry_are_tools_too(install):
+    # setuptools' launcher stubs (cli.exe ...) and protoc.exe sit in site-packages and are never started by Istinbat.
+    app, python, system = install
+    before = dlls.scan(app, python, system)
+    packages = app / ".venv" / "Lib" / "site-packages"
+    program(packages / "setuptools" / "cli.exe", ["VCRUNTIME140.dll", "KERNEL32.dll"])
+    program(packages / "setuptools" / "cli-64.exe", ["VCRUNTIME140.dll", "KERNEL32.dll"])
+    program(packages / "grpc_tools" / "bin" / "protoc.exe", ["MSVCP140.dll", "VCRUNTIME140_1.dll", "KERNEL32.dll"])
+    # A wheel can also put a program into the environment's Scripts folder, next to the interpreter launchers.
+    program(app / ".venv" / "Scripts" / "chroma.exe", ["VCRUNTIME140.dll", "KERNEL32.dll"])
+    after = dlls.scan(app, python, system)
+    assert after.tools["count"] == 4
+    assert sorted(after.tools["needs"]) == ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"]
+    assert after.problems() == before.problems()
+    assert after.vcpp["msvcp140.dll"]["unprovided"] == before.vcpp["msvcp140.dll"]["unprovided"]
+
+
+def test_the_interpreter_launchers_of_the_environment_are_still_judged(install):
+    app, python, system = install
+    program(app / ".venv" / "Scripts" / "pythonw.exe", ["VCRUNTIME140.dll", "KERNEL32.dll"])
+    report = dlls.scan(app, python, system)
+    assert report.tools["count"] == 0
+    unprovided = report.vcpp["vcruntime140.dll"]["unprovided"]
+    assert "pythonw.exe" in {Path(file.replace("\\", "/")).name for file in unprovided}
+
+
+def test_a_folder_named_like_site_packages_elsewhere_is_not_a_tools_folder(install):
+    app, python, system = install
+    program(app / "site-packages" / "tool.exe", ["VCRUNTIME140.dll"])
+    report = dlls.scan(app, python, system)
+    assert report.tools["count"] == 0
+    assert "tool.exe" in {Path(file.replace("\\", "/")).name for file in report.vcpp["vcruntime140.dll"]["unprovided"]}
+
+
+def test_the_lib_folders_that_pytorch_and_llama_cpp_register_themselves_provide_their_dlls(install):
+    app, python, system = install
+    packages = app / ".venv" / "Lib" / "site-packages"
+    program(packages / "torch" / "_C.pyd", ["torch_python.dll", "KERNEL32.dll"])
+    program(packages / "torch" / "lib" / "torch_python.dll", ["KERNEL32.dll"])
+    program(packages / "llama_cpp" / "lib" / "llama.dll", ["ggml.dll", "KERNEL32.dll"])
+    program(packages / "llama_cpp" / "lib" / "ggml.dll", ["KERNEL32.dll"])
+    report = dlls.scan(app, python, system)
+    assert "torch_python.dll" not in report.missing and "ggml.dll" not in report.missing
+    # A DLL that nothing registers is still reported.
+    program(packages / "other" / "_x.pyd", ["torch_python-missing.dll", "KERNEL32.dll"])
+    assert "torch_python-missing.dll" in dlls.scan(app, python, system).missing
 
 
 def test_a_program_that_is_not_one_of_gtks_tools_is_still_judged_on_its_own(install):

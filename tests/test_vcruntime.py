@@ -66,7 +66,7 @@ def make_studio(
     return root
 
 
-def test_the_runtime_dlls_are_copied_and_the_python_runtime_is_left_to_pythons_own_installer(tmp_path):
+def test_the_runtime_dlls_are_copied_and_the_c_runtime_is_left_to_pythons_own_installer(tmp_path):
     studio = make_studio(tmp_path / "vs")
     done = run(
         tmp_path,
@@ -76,8 +76,10 @@ def test_the_runtime_dlls_are_copied_and_the_python_runtime_is_left_to_pythons_o
     assert done.returncode == 0, done.stderr
     names = sorted(path.name for path in (tmp_path / "out").iterdir())
     assert names == sorted(["NOTICE.txt", "concrt140.dll", "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll",
-                            "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll", "versions.txt", "vcomp140.dll"])
-    assert not any(name.startswith("vcruntime140") for name in names)  # Beside python.exe already.
+                            "msvcp140_atomic_wait.dll", "msvcp140_codecvt_ids.dll", "versions.txt", "vcomp140.dll",
+                            "vcruntime140_threads.dll"])
+    # vcruntime140.dll and vcruntime140_1.dll are beside python.exe already; the threads DLL is not (PyTorch needs it).
+    assert not {"vcruntime140.dll", "vcruntime140_1.dll"} & set(names)
 
 
 def test_the_function_answers_with_a_plain_true_and_leaves_nothing_else_in_the_pipeline(tmp_path):
@@ -121,25 +123,27 @@ def test_the_note_says_where_the_files_came_from_and_which_files_they_are(tmp_pa
     assert "Taken from: Visual Studio's Redistributable 14.44.35112" in notes
     digest = hashlib.sha256(b"msvcp140.dll 14.44.35112").hexdigest().upper()
     assert "msvcp140.dll  version " in notes and f"sha256 {digest}" in notes
-    assert "vcruntime140" not in notes
+    assert "vcruntime140.dll" not in notes and "vcruntime140_1.dll" not in notes
+    assert "vcruntime140_threads.dll  version " in notes
     assert "Microsoft" in (tmp_path / "out" / "NOTICE.txt").read_text(encoding="utf-8-sig")
 
 
 def test_a_folder_given_by_the_user_is_used_as_it_is(tmp_path):
     mine = tmp_path / "mine"
     mine.mkdir()
-    for name in ("msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140.dll", "unrelated.dll"):
+    for name in ("msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140_threads.dll", "vcruntime140.dll",
+                 "unrelated.dll"):
         (mine / name).write_text(name, encoding="utf-8")
     assert get_vcruntime(tmp_path, tmp_path / "out", f"-From '{mine}'").returncode == 0
     assert sorted(path.name for path in (tmp_path / "out").iterdir()) == sorted(
-        ["msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "NOTICE.txt", "versions.txt"])
+        ["msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140_threads.dll", "NOTICE.txt", "versions.txt"])
 
 
-@pytest.mark.parametrize("missing", ["msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll"])
+@pytest.mark.parametrize("missing", ["msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140_threads.dll"])
 def test_a_folder_that_lacks_a_dll_the_libraries_need_is_refused_with_its_name(tmp_path, missing):
     mine = tmp_path / "mine"
     mine.mkdir()
-    for name in ("msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll"):
+    for name in ("msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140_threads.dll"):
         if name != missing:
             (mine / name).write_text(name, encoding="utf-8")
     done = run(

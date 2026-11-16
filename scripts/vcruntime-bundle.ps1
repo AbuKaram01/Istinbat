@@ -18,14 +18,16 @@
 # Why the last Get-VcRuntime returned $false.
 $script:VcRuntimeProblem = ''
 
-# What is copied: the C++ standard library (msvcp140.dll, msvcp140_1.dll, ...), the parallel runtime (concrt140.dll)
-# and OpenMP (vcomp140.dll). Not vcruntime140.dll and vcruntime140_1.dll: Python's own installer puts them beside
-# python.exe, and a second copy in another folder would be a second copy of the C runtime in one process.
-$script:VcRuntimePatterns = @('msvcp140*.dll', 'concrt140.dll', 'vcomp140.dll')
+# What is copied: the C++ standard library (msvcp140.dll, msvcp140_1.dll, ...), the parallel runtime (concrt140.dll),
+# OpenMP (vcomp140.dll) and the thread support of the C++ runtime (vcruntime140_threads.dll, which PyTorch imports).
+# Not vcruntime140.dll and vcruntime140_1.dll: Python's own installer puts them beside python.exe, and a second copy in
+# another folder would be a second copy of the C runtime in one process. Python's installer does not carry
+# vcruntime140_threads.dll, so that one has to come with Istinbat.
+$script:VcRuntimePatterns = @('msvcp140*.dll', 'concrt140.dll', 'vcomp140.dll', 'vcruntime140_threads.dll')
 
 # Without these the libraries do not load on a machine that lacks the Redistributable (what packaging\windows\dlls.py
 # found).
-$script:VcRuntimeRequired = @('msvcp140.dll', 'msvcp140_1.dll', 'vcomp140.dll')
+$script:VcRuntimeRequired = @('msvcp140.dll', 'msvcp140_1.dll', 'vcomp140.dll', 'vcruntime140_threads.dll')
 
 # --- Finding the Redistributable ---------------------------------------------------------------------------------
 
@@ -157,7 +159,8 @@ function Write-VcRuntimeFolder([string]$Folder, [hashtable]$Files, [string]$Orig
     }
     Set-Content -LiteralPath (Join-Path $Folder 'versions.txt') -Value $notes -Encoding UTF8
     Set-Content -LiteralPath (Join-Path $Folder 'NOTICE.txt') -Encoding UTF8 -Value @(
-        'These are the Microsoft Visual C++ runtime libraries (msvcp140*, concrt140, vcomp140), copied',
+        'These are the Microsoft Visual C++ runtime libraries (msvcp140*, concrt140, vcomp140, vcruntime140_threads),',
+        'copied',
         'unchanged from the Redistributable files of Visual Studio on the machine that built this installer.',
         'Istinbat carries them so that the libraries it uses (PyTorch, onnxruntime, llama.cpp) load on a',
         'computer that does not have the Visual C++ Redistributable. They remain Microsoft software and are',

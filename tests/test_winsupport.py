@@ -178,7 +178,18 @@ def test_python_own_runtime_is_never_loaded_a_second_time(monkeypatch, tmp_path)
     monkeypatch.setattr(winsupport, "_load_library", lambda path: loaded.append(path.name))
     monkeypatch.setattr(os, "add_dll_directory", lambda path: None, raising=False)
     winsupport.configure_vcruntime(folder)
-    assert not [name for name in loaded if name.startswith("vcruntime")]
+    assert not [name for name in loaded if name in ("vcruntime140.dll", "vcruntime140_1.dll")]
+
+
+def test_the_threads_runtime_that_pythons_installer_does_not_carry_is_loaded_with_the_others(monkeypatch, tmp_path):
+    # PyTorch imports vcruntime140_threads.dll. It is not beside python.exe, so the installer's copy is loaded here,
+    # after the vcruntime140.dll that is already in the process.
+    folder = make_vcruntime(tmp_path / "vcruntime", (*RUNTIME_DLLS, "vcruntime140.dll", "vcruntime140_threads.dll"))
+    monkeypatch.setattr(winsupport, "_load_library", lambda path: None)
+    monkeypatch.setattr(os, "add_dll_directory", lambda path: None, raising=False)
+    assert winsupport.configure_vcruntime(folder) == [
+        "concrt140.dll", "msvcp140.dll", "msvcp140_1.dll", "vcomp140.dll", "vcruntime140_threads.dll"
+    ]
 
 
 def test_prepare_loads_the_installers_runtime_before_gtk_is_set_up(monkeypatch, windows):

@@ -120,8 +120,6 @@ Maintainer: $MAINTAINER
 Description: Istinbat${summary_suffix} - ask questions about your Arabic books, fully offline
  Index your plain-text books and ask questions about them. Answers are drawn
  from the books themselves by local embedding, reranking and language models.
- Downloads and compiles its Python dependencies on first install (needs
- internet access then; not needed afterwards to run it).
 CONTROL
 
     { printf '#!/bin/sh\nset -e\n%s\nexit 0\n' "$postinst_body"; } > "$deb_root/DEBIAN/postinst"

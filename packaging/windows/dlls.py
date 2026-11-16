@@ -246,6 +246,12 @@ _PYTHON_FOLDERS_SCANNED = ("", "DLLs")
 
 # Suffixes of the files that have an import table.
 _PE_SUFFIXES = {".dll", ".pyd", ".exe"}
+# Folders inside site-packages that a library adds to the DLL search path itself when it is imported (PyTorch with
+# ``os.add_dll_directory`` in its ``__init__``, llama-cpp-python before it loads ``llama.dll``). The scan cannot see
+# that call, so it takes these folders as known.
+_SELF_REGISTERED_FOLDERS = (("torch", "lib"), ("llama_cpp", "lib"))
+# The programs of the environment that Istinbat does start.
+_INTERPRETERS = ("python.exe", "pythonw.exe")
 
 
 @dataclass
@@ -263,8 +269,10 @@ class Report:
             ``{"importers": n, "unprovided": [files], "provided_by": [folders]}``.
         missing: Static imports that nothing provides and Windows lacks, as DLL name -> importing files.
         delayed: Delay-loaded imports that nothing provides (information only), as DLL name -> importing files.
-        tools: GTK's command-line tools (``gtk\bin\*.exe``), which Istinbat never starts: ``count`` is how many there
-            are, ``needs`` maps each runtime DLL that they lack beside them to the tools that import it.
+        tools: The command-line programs that Istinbat never starts, GTK's (``gtk\bin\*.exe``) and the ones that
+            Python libraries carry (in ``site-packages`` or in the environment's ``Scripts``, such as setuptools'
+            launchers): ``count`` is how many there are, ``needs`` maps each runtime DLL that they lack beside them to
+            the programs that import it.
         allowed: Lower-case DLL names that may be missing without counting as a problem.
     """
 
@@ -347,7 +355,8 @@ def shared_provider_folders(app: Path, python_home: Path | None, extra: tuple[Pa
     These are the folders as the installed program sets them up. The Python folder is the application directory of
     the interpreter. Istinbat puts ``gtk\bin`` (and, when the installer carries one, ``vcruntime``) on the DLL search
     path at start-up (``winsupport``). Wheels that carry their own copies of DLLs (``numpy.libs``, ``scipy.libs``)
-    register their ``*.libs`` folder from their ``__init__``.
+    register their ``*.libs`` folder from their ``__init__``, and PyTorch and llama.cpp register their ``lib`` folder
+    the same way.
 
     Args:
         app: The installation folder.
@@ -366,6 +375,7 @@ def shared_provider_folders(app: Path, python_home: Path | None, extra: tuple[Pa
         folders += sorted(
             entry for entry in packages.iterdir() if entry.is_dir() and entry.name.lower().endswith(".libs")
         )
+        folders += [packages.joinpath(*parts) for parts in _SELF_REGISTERED_FOLDERS]
     folders += list(extra)
     return [folder for folder in folders if folder.is_dir()]
 
@@ -405,14 +415,14 @@ def scan(app: Path, python_home: Path | None = None, system_dir: Path | None = N
     # Findings, each keyed by the lower-case DLL name and holding file names as shown in the report: the files that
     # import a Visual C++ runtime DLL (importers) and those of them that find no copy (unprovided); the folders where a
     # copy was found (provided_by); the static imports that nothing provides (missing); the delay-loaded ones
-    # (delayed_gaps); and the runtime DLLs that GTK's command-line tools lack (tool_needs).
+    # (delayed_gaps); and the runtime DLLs that the command-line tools lack (tool_needs).
     importers: dict[str, set[str]] = defaultdict(set)
     unprovided: dict[str, set[str]] = defaultdict(set)
     provided_by: dict[str, set[str]] = defaultdict(set)
     missing: dict[str, set[str]] = defaultdict(set)
     delayed_gaps: dict[str, set[str]] = defaultdict(set)
     tool_needs: dict[str, set[str]] = defaultdict(set)
-    tools_folder = app / "gtk" / "bin"
+    tools_folders = (app / "gtk" / "bin", app / ".venv" / "Lib" / "site-packages", app / ".venv" / "Scripts")
 
     # Each source is (root folder, its files, whether it lies outside the installation); the last value only marks the
     # files of the Python folder in the report.
@@ -429,10 +439,11 @@ def scan(app: Path, python_home: Path | None = None, system_dir: Path | None = N
                 continue
             shown = _shown(path, root, outside)
             own = listings.names(path.parent)
-            if path.suffix.lower() == ".exe" and path.parent == tools_folder:
-                # GTK's command-line tools (gdbus.exe, glib-compile-schemas.exe, cjpeg.exe ...): started on their own,
-                # with only their own folder and Windows to look in. Istinbat never starts them, so they are not
-                # judged. They are counted, and the runtime DLLs they would lack are noted for information.
+            if _is_tool(path, tools_folders):
+                # Command-line tools: GTK's (gdbus.exe, glib-compile-schemas.exe ...) and the ones that Python
+                # libraries carry (setuptools' cli.exe launchers, protoc.exe ...). They are started on their own, with
+                # only their own folder and Windows to look in. Istinbat never starts them, so they are not judged.
+                # They are counted, and the runtime DLLs they would lack are noted for information.
                 report.tools["count"] += 1
                 for raw in imports.static:
                     if is_vcpp_runtime(raw) and raw.lower() not in own:
@@ -481,6 +492,22 @@ def scan(app: Path, python_home: Path | None = None, system_dir: Path | None = N
     report.missing = {name: sorted(files) for name, files in sorted(missing.items())}
     report.delayed = {name: sorted(files) for name, files in sorted(delayed_gaps.items())}
     return report
+
+
+def _inside(path: Path, folder: Path) -> bool:
+    """Return whether ``path`` lies inside ``folder``; whole folder names count, so ``app2`` is not inside ``app``."""
+    return os.path.normcase(str(path)).startswith(os.path.normcase(str(folder)).rstrip("\\/") + os.sep)
+
+
+def _is_tool(path: Path, folders: tuple[Path, ...]) -> bool:
+    """Return whether ``path`` is a command-line program that Istinbat never starts.
+
+    Every ``.exe`` inside ``folders`` is one, except the interpreter launchers (``python.exe``, ``pythonw.exe``): the
+    Start menu entry starts ``pythonw.exe`` of the environment.
+    """
+    if path.suffix.lower() != ".exe" or path.name.lower() in _INTERPRETERS:
+        return False
+    return any(_inside(path, folder) for folder in folders)
 
 
 def _shown(path: Path, root: Path, outside: bool) -> str:
@@ -546,8 +573,8 @@ def format_report(report: Report) -> list[str]:
             or "nothing from the machine"
         )
         lines.append(
-            f"GTK's {report.tools['count']} command-line tools in gtk\\bin are not started by Istinbat "
-            f"and were not judged; run on their own they would look for: {needs}"
+            f"{report.tools['count']} command-line tools (GTK's in gtk\\bin, and the ones that Python libraries carry) "
+            f"are not started by Istinbat and were not judged; run on their own they would look for: {needs}"
         )
     problems = report.problems()
     if problems:

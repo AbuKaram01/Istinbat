@@ -86,6 +86,8 @@ def configure_gtk(gtk: Path) -> None:
 
 # Handles of the runtime DLLs loaded by configure_vcruntime(), kept for as long as the process lives.
 _loaded_runtime: list[object] = []
+# The C runtime DLLs that Python's own installer puts beside python.exe (lower case).
+_PYTHONS_OWN_RUNTIME = ("vcruntime140.dll", "vcruntime140_1.dll")
 
 
 def find_vcruntime() -> Path | None:
@@ -112,7 +114,8 @@ def configure_vcruntime(folder: Path) -> list[str]:
     Redistributable cannot give a library a runtime that is too old for it).
 
     The folder is also made known for DLLs that are looked up later and for programs started from here. Python's
-    own ``vcruntime140.dll`` is not part of it: python.exe already has it loaded.
+    own ``vcruntime140.dll`` and ``vcruntime140_1.dll`` are not part of it: python.exe already has them loaded.
+    ``vcruntime140_threads.dll``, which PyTorch imports and Python does not carry, is.
 
     Returns:
         The names of the DLLs that were loaded. A DLL that cannot be loaded is skipped, leaving the system to
@@ -126,7 +129,7 @@ def configure_vcruntime(folder: Path) -> list[str]:
     loaded: list[str] = []
     # Sorted by name so that msvcp140.dll is loaded before msvcp140_1.dll.
     for dll in sorted(folder.glob("*.dll"), key=lambda path: path.name.lower()):
-        if dll.name.lower().startswith("vcruntime"):
+        if dll.name.lower() in _PYTHONS_OWN_RUNTIME:
             # python.exe already has its own copy loaded; a second one would be a second C runtime.
             continue
         try:
