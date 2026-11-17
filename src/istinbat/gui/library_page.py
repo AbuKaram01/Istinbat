@@ -42,7 +42,7 @@ class LibraryPage(Adw.NavigationPage):
         self._add_button = Gtk.Button(label=self._t("library.add"))
         self._add_button.connect("clicked", self._on_add_clicked)
         self._index_button = Gtk.Button(label=self._t("library.index"), css_classes=["suggested-action"])
-        self._index_button.connect("clicked", lambda _b: self._start(self._services.engine.index_library))
+        self._index_button.connect("clicked", lambda _b: self._run(lambda engine: engine.index_library))
         header = Adw.HeaderBar()
         header.pack_end(self._index_button)
         header.pack_end(self._add_button)
@@ -151,8 +151,13 @@ class LibraryPage(Adw.NavigationPage):
 
     def rebuild(self) -> None:
         """Wipe the index and index every book again (called from Preferences)."""
-        if self._services.engine is not None:
-            self._start(self._services.engine.rebuild_index)
+        self._run(lambda engine: engine.rebuild_index)
+
+    def _run(self, pick) -> None:
+        """Index with the engine's ``pick(engine)`` method, loading the models first when that has not happened."""
+        if self._window.is_busy:
+            return
+        self._window.ensure_engine(lambda: self._start(pick(self._services.engine)))
 
     def _start(self, runner) -> None:
         if self._window.is_busy:

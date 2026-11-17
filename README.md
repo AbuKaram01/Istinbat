@@ -63,10 +63,16 @@ sudo pacman -U packaging/dist/istinbat-0.1.0-1-any.pkg.tar.zst      # or istinba
 
 ### First launch
 
-The first start shows "Couldn't load the models". Press **Download Models…** (or open **Preferences**, Ctrl+,
-and expand **Download models**), pick what you want and press **Reload models** when it finishes. Then set your
-books folder, add `.txt` books on the **Library** page and press **Index**. If you already have the models,
-point the fields in **Preferences** at them instead.
+When no models are installed yet, the first start opens a **Welcome Guide** with three pages: what Istinbat does,
+the download rows for the three models (embedding, reranking and language), and a summary of what is still
+missing. Pick the models you want and press **Download**; closing the guide does not stop a download. The guide
+opens again from the main menu (**Welcome Guide**) whenever you want it. If you already have the models, skip
+the step and point the fields in **Preferences** at them instead.
+
+Nothing is loaded when the window opens. The models load the first time they are needed (your first question,
+or **Index** on the Library page), with a progress page while they do. If they cannot be loaded, the error page
+explains why, offers **Download Models…** and **Open Preferences**, and **Back** returns to the conversation.
+Then set your books folder, add `.txt` books on the **Library** page and press **Index**.
 
 ### Downloading models
 
@@ -83,7 +89,8 @@ point the fields in **Preferences** at them instead.
   only when complete, so an interrupted download (or **Stop**) continues where it stopped when you press Download again.
   Short connection drops are retried automatically.
 - A finished download becomes the selected model. Models already on disk show **Use** instead, so you can switch
-  between quantizations; the choice takes effect after **Reload models**.
+  between quantizations; the choice takes effect the next time the models load (press **Reload models** if they
+  are already loaded).
 - A download runs in the background: you can keep asking questions, and closing Preferences does not stop it.
 - Integrity is checked by size (and llama.cpp validates a GGUF file when it loads it).
 

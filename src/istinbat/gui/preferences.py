@@ -281,7 +281,8 @@ class PreferencesDialog(Adw.PreferencesDialog):
         return self._t("prefs.data.auto_delete.days", days=days)
 
     def _show_restart_hint(self) -> None:
-        if not self._restart_hint_shown:
+        """Say that a change needs a reload, once; there is nothing to reload before the models first load."""
+        if self._services.engine is not None and not self._restart_hint_shown:
             self._restart_hint_shown = True
             self.add_toast(Adw.Toast(title=self._t("prefs.reload.hint")))
 

@@ -4,7 +4,9 @@
 from istinbat.core import IndexingConfig
 from istinbat.core import manifest as manifest_module
 from istinbat.core.books import BookFile, book_name, load_book_files
+from istinbat.core.indexer import indexed_book_names
 from istinbat.core.manifest import Manifest, classify, content_digest
+from istinbat.core.settings import Settings
 
 
 def test_book_name_drops_directory_and_extension():
@@ -57,3 +59,15 @@ def test_manifest_persists_and_survives_corruption(tmp_path):
 
     (tmp_path / "broken.json").write_text("{oops", encoding="utf-8")
     assert len(Manifest.load(str(tmp_path / "broken.json"))) == 0
+
+
+def test_indexed_book_names_come_from_the_manifest_without_the_engine(tmp_path):
+    settings = Settings()
+    settings.paths.manifest_file = str(tmp_path / "manifest.json")
+    assert indexed_book_names(settings) == []                      # No manifest yet.
+
+    manifest = Manifest(settings.paths.manifest_file)
+    manifest.record(str(tmp_path / "b" / "Second.txt"), "d2")
+    manifest.record(str(tmp_path / "First.txt"), "d1")
+    manifest.save()
+    assert indexed_book_names(settings) == ["First", "Second"]

@@ -136,6 +136,16 @@ def scan_library(settings: Settings) -> list[BookInfo]:
     return sorted(books, key=lambda info: info.name)
 
 
+def indexed_book_names(settings: Settings) -> list[str]:
+    """Return the sorted names of the books the index holds, read from the manifest.
+
+    It needs neither the vector store nor a model, so the interface can offer the search scope before the
+    engine is loaded.
+    """
+    manifest = Manifest.load(settings.paths.manifest_file)
+    return sorted({book_name(path) for path in manifest.known_paths()})
+
+
 def _require_books_dir(settings: Settings) -> None:
     if not os.path.isdir(settings.paths.books_dir):
         raise FileNotFoundError(f"Books folder not found: {settings.paths.books_dir}")

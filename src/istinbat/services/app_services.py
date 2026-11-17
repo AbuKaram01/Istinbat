@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..core.catalog import ModelOption
 from ..core.engine import Engine
+from ..core.indexer import indexed_book_names
 from ..core.progress import ProgressCallback
 from ..core.settings import Language, Settings, load_settings, save_settings
 from ..i18n import Translator
@@ -71,6 +72,29 @@ class AppServices:
         setattr(self.settings.paths, option.kind.settings_attribute, str(chosen))
         self.save_settings()
 
+    def should_show_welcome(self) -> bool:
+        """Return whether the first-run guide should open at start-up.
+
+        Only someone who has not seen it and has no models does. An existing installation (all three models
+        present) never sees it and is recorded as done, so deleting a model later does not bring it up either.
+        """
+        if self.settings.app.welcome_done:
+            return False
+        if self.settings.paths.models_ready():
+            self.mark_welcome_done()
+            return False
+        return True
+
+    def mark_welcome_done(self) -> None:
+        """Record that the guide has been dealt with."""
+        if not self.settings.app.welcome_done:
+            self.settings.app.welcome_done = True
+            self.save_settings()
+
+    def indexed_books(self) -> list[str]:
+        """Names of the indexed books, known without loading the engine."""
+        return indexed_book_names(self.settings)
+
     def set_language(self, language: Language) -> None:
         self.settings.app.language = language
         self.translate.set_language(language)
@@ -105,3 +129,7 @@ class AppServices:
 
     def unload_engine(self) -> None:
         self.engine = None
+
+    def clear_load_error(self) -> None:
+        """Forget a failed load, so that a rebuilt window opens on the main page again."""
+        self.load_error = None

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -35,6 +37,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.services = services
         self._t = services.translate
         self._busy: str | None = None
+        self._after_load: Callable[[], None] | None = None    # What to do once the models have loaded.
 
         self.set_title("Istinbat")
         self.set_default_size(*_DEFAULT_SIZE)
@@ -47,7 +50,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._toasts.set_child(self._stack)
 
         self._loading = LoadingPage(self._t)
-        self._error = ErrorPage(self._t)
+        self._error = ErrorPage(self._t, on_back=self.leave_error)
         self._stack.add_named(self._loading, _PAGE_LOADING)
         self._stack.add_named(self._error, _PAGE_ERROR)
         self._stack.add_named(self._build_main(), _PAGE_MAIN)
@@ -95,14 +98,28 @@ class MainWindow(Adw.ApplicationWindow):
         return self._split
 
     def _show_initial_page(self) -> None:
-        if self.services.engine is not None:
-            self._enter_main()
-        elif self.services.load_error is not None:
+        """Open on the main page: the models are loaded when they are first needed, not when the window opens."""
+        if self.services.engine is None and self.services.loading:
+            self.show_loading()
+        elif self.services.engine is None and self.services.load_error is not None:
             self.on_load_error(self.services.load_error)
         else:
-            self.show_loading()
+            self._enter_main()
 
     # -- Engine loading -----------------------------------------------------------
+
+    def ensure_engine(self, on_ready: Callable[[], None]) -> None:
+        """Run ``on_ready`` once the engine is loaded, loading the models first if they are not.
+
+        Loading takes a while, so the window shows the loading page meanwhile and carries on afterwards.
+        """
+        if self.services.engine is not None:
+            on_ready()
+            return
+        self._after_load = on_ready
+        if not self.services.loading:
+            self.show_loading()
+            self.get_application().activate_action("load-engine", None)
 
     def show_loading(self) -> None:
         self._loading.set_progress(0.0, "")
@@ -113,14 +130,23 @@ class MainWindow(Adw.ApplicationWindow):
 
     def on_load_done(self) -> None:
         self._enter_main()
+        callback, self._after_load = self._after_load, None
+        if callback is not None:
+            callback()
 
     def on_load_error(self, error: Exception) -> None:
+        self._after_load = None
         self._error.set_detail(str(error))
         self._stack.set_visible_child_name(_PAGE_ERROR)
 
+    def leave_error(self) -> None:
+        """Go back to the conversation from the error page (the models stay unloaded)."""
+        self.services.clear_load_error()
+        self._enter_main()
+
     def _enter_main(self) -> None:
         self._stack.set_visible_child_name(_PAGE_MAIN)
-        self._chat.on_engine_ready()
+        self._chat.refresh_books()
         self.refresh_sidebar()
 
     def reload_engine(self) -> None:
@@ -145,7 +171,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def open_conversation(self, conversation_id: int | None) -> None:
         """Select a stored conversation (used when the window is rebuilt)."""
-        if conversation_id is None or self.services.engine is None:
+        if conversation_id is None:
             return
         self._chat.open_conversation(conversation_id)
         self.refresh_sidebar(select_id=conversation_id)
@@ -187,7 +213,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._library.rebuild()
 
     def on_library_changed(self) -> None:
-        self._chat.on_engine_ready()
+        self._chat.refresh_books()
 
     # -- Busy state and feedback --------------------------------------------------
 
@@ -210,8 +236,9 @@ class MainWindow(Adw.ApplicationWindow):
         name = model_name(event.option, self._t)
         if event.kind is DownloadEventKind.FINISHED:
             toast = Adw.Toast(title=self._t("prefs.models.done", name=name))
-            toast.set_button_label(self._t("prefs.models.done.reload"))
-            toast.connect("button-clicked", lambda _toast: self.reload_engine())
+            if self.services.engine is not None:    # Otherwise the new model is used when the models first load.
+                toast.set_button_label(self._t("prefs.models.done.reload"))
+                toast.connect("button-clicked", lambda _toast: self.reload_engine())
         elif event.kind is DownloadEventKind.CANCELLED:
             toast = Adw.Toast(title=self._t("prefs.models.cancelled"))
         elif event.kind is DownloadEventKind.FAILED:
@@ -226,7 +253,8 @@ class MainWindow(Adw.ApplicationWindow):
         else:
             return
         dialog = self.get_visible_dialog()
-        (dialog if isinstance(dialog, Adw.PreferencesDialog) else self._toasts).add_toast(toast)
+        # A dialog with its own toast area (Preferences, the welcome guide) shows the toast where the user is looking.
+        (dialog if hasattr(dialog, "add_toast") else self._toasts).add_toast(toast)
 
     def notify_answer(self, preview: str) -> None:
         """Send a desktop notification when an answer finishes while the window is in the background."""

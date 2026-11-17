@@ -70,7 +70,6 @@ class ChatView(Gtk.Box):
         bar.append(self._send)
         self.append(self._stack)
         self.append(Adw.Clamp(maximum_size=_MAX_CONTENT_WIDTH, child=bar))
-        self.set_input_enabled(False)
 
     # -- State exposed to the window ----------------------------------------------
 
@@ -78,9 +77,9 @@ class ChatView(Gtk.Box):
     def conversation_id(self) -> int | None:
         return self._conversation_id
 
-    def on_engine_ready(self) -> None:
+    def refresh_books(self) -> None:
+        """Show the indexed books in the scope picker (after the library or the engine changed)."""
         self._refresh_scope(self._current_scope())
-        self.set_input_enabled(True)
 
     def set_input_enabled(self, enabled: bool) -> None:
         self._entry.set_sensitive(enabled)
@@ -133,8 +132,12 @@ class ChatView(Gtk.Box):
         self._send.set_sensitive(False)
 
     def _submit(self, question: str) -> None:
+        if not question or self._window.is_busy:
+            return
         engine = self._services.engine
-        if not question or engine is None or self._window.is_busy:
+        if engine is None:
+            # The models load the first time they are needed; the question stays in the entry meanwhile.
+            self._window.ensure_engine(lambda: self._submit(question))
             return
         self._ensure_conversation()
         scope = self._current_scope()
@@ -220,7 +223,7 @@ class ChatView(Gtk.Box):
 
     def _refresh_scope(self, selection: list[str] | None) -> None:
         engine = self._services.engine
-        self.scope_button.set_books(engine.books() if engine else [], selection)
+        self.scope_button.set_books(engine.books() if engine else self._services.indexed_books(), selection)
 
     def _on_scope_changed(self, selection: list[str] | None) -> None:
         if self._conversation_id is None:

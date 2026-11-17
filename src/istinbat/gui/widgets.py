@@ -55,6 +55,7 @@ def window_buttons(translate: Callable[..., str]) -> tuple[Gtk.Button, Gtk.MenuB
 
     menu = Gio.Menu()
     menu.append(translate("menu.preferences"), "app.preferences")
+    menu.append(translate("menu.welcome"), "app.welcome-guide")
     menu.append(translate("menu.about"), "app.about")
     menu.append(translate("menu.quit"), "app.quit")
     primary = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu)

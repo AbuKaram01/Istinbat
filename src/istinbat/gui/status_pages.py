@@ -49,9 +49,14 @@ class LoadingPage(Adw.Bin):
 
 
 class ErrorPage(Adw.Bin):
-    """Shown when the models cannot be loaded (typically a first run with no model paths)."""
+    """Shown when the models cannot be loaded (typically a first run with no model paths).
 
-    def __init__(self, translate: Callable[..., str]) -> None:
+    Args:
+        translate: The interface translator.
+        on_back: Called by the "Back" button, which returns to the conversation with the models still unloaded.
+    """
+
+    def __init__(self, translate: Callable[..., str], on_back: Callable[[], None]) -> None:
         super().__init__()
         view = Adw.ToolbarView()
         view.add_top_bar(_header(translate))
@@ -66,9 +71,12 @@ class ErrorPage(Adw.Bin):
         retry.add_css_class("pill")
         retry.set_action_name("app.reload-engine")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        back = Gtk.Button(label=translate("error.back"), halign=Gtk.Align.CENTER, css_classes=["flat"])
+        back.connect("clicked", lambda _button: on_back())
         box.append(download)
         box.append(preferences)
         box.append(retry)
+        box.append(back)
         self._page = Adw.StatusPage(icon_name="dialog-warning-symbolic", title=translate("error.title"), child=box)
         view.set_content(self._page)
         self.set_child(view)

@@ -53,6 +53,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM"]
 "tests/gui_support.py" = ["E402"]
 "tests/test_gui.py" = ["E402"]
 "tests/test_gui_downloads.py" = ["E402"]
+"tests/test_gui_welcome.py" = ["E402"]
 "tests/test_markdown_view.py" = ["E402"]
 "scripts/*" = ["E402"]
 # Windows environment variable names are case-insensitive; the scan spells them the way Windows does.

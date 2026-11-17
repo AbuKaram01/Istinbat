@@ -4,8 +4,6 @@
 """The "Download models" menu in Preferences, driven through the real interface with a fake downloader."""
 
 import os
-import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -23,38 +21,15 @@ except (ValueError, ImportError):
 if not Gtk.init_check():
     pytest.skip("no display available", allow_module_level=True)
 
+from gui_fakes import FakeDownloader
 from gui_support import build_app, pump, start
 
 from istinbat.core.catalog import EMBEDDER, LLMS, RERANKER, option_by_key
-from istinbat.core.downloads import DownloadCancelled, DownloadProgress, NotEnoughSpaceError
+from istinbat.core.downloads import NotEnoughSpaceError
 from istinbat.core.settings import Language
 from istinbat.gui.formatting import size_label
 from istinbat.gui.model_downloads import RowState
 from istinbat.gui.preferences import PreferencesDialog
-
-
-class FakeDownloader:
-    """Pretends to download: reports some progress, then waits to be released, failed or cancelled."""
-
-    def __init__(self):
-        self.calls = []
-        self.release = threading.Event()
-        self.failure = None
-
-    def __call__(self, option, models_dir, *, progress, cancel):
-        self.calls.append((option.key, models_dir))
-        progress(DownloadProgress(option.approx_bytes // 4, option.approx_bytes, option.files[0].path))
-        while not self.release.is_set():
-            if cancel():
-                raise DownloadCancelled
-            time.sleep(0.005)
-        if self.failure:
-            raise self.failure
-        for file in option.files:
-            target = Path(models_dir) / option.directory / file.path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(b"x")
-        return option.local_path(models_dir)
 
 
 @pytest.fixture

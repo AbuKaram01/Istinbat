@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 AbuKaram01
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The GTK application: lifecycle, actions, language switching and engine loading."""
+"""The GTK application: lifecycle, actions, language switching and (on demand) engine loading."""
 
 from __future__ import annotations
 
@@ -45,7 +45,9 @@ class Application(Adw.Application):
             ("download-models", self._on_download_models, []),
             ("new-conversation", self._on_new_conversation, ["<primary>n"]),
             ("toggle-language", self._on_toggle_language, []),
+            ("load-engine", self._on_load_engine, []),
             ("reload-engine", self._on_reload_engine, []),
+            ("welcome-guide", self._on_welcome_guide, []),
         ):
             self._add_action(name, callback, shortcuts)
 
@@ -71,8 +73,20 @@ class Application(Adw.Application):
             self._window = MainWindow(self, self.services)
         assert self._window is not None
         self._window.present()
-        if first_activation and self.services.engine is None and not self.services.loading:
-            self._start_engine_load()
+        # The models are not loaded here: that happens when the first question or the first indexing needs them.
+        if first_activation and self.services.should_show_welcome():
+            self._show_welcome()
+
+    # -- Welcome guide ------------------------------------------------------------
+
+    def _show_welcome(self) -> None:
+        from .welcome import WelcomeDialog
+
+        if self._window is not None:
+            WelcomeDialog(self._window).present(self._window)
+
+    def _on_welcome_guide(self, *_args: object) -> None:
+        self._show_welcome()
 
     # -- Engine loading -----------------------------------------------------------
 
@@ -90,6 +104,11 @@ class Application(Adw.Application):
                 self._window.on_load_error(error)
 
         self.services.load_engine(on_progress, on_done, on_error)
+
+    def _on_load_engine(self, *_args: object) -> None:
+        """Load the models now (a question or indexing is waiting for them)."""
+        if self.services.engine is None and not self.services.loading:
+            self._start_engine_load()
 
     def _on_reload_engine(self, *_args: object) -> None:
         if self.services.worker.is_busy or self._window is None:
@@ -135,7 +154,7 @@ class Application(Adw.Application):
             self.set_accels_for_action(f"app.{name}", shortcuts)
 
     def _on_new_conversation(self, *_args: object) -> None:
-        if self._window is not None and not self._window.is_busy and self.services.engine is not None:
+        if self._window is not None and not self._window.is_busy:
             self._window.new_conversation()
 
     def _on_preferences(self, *_args: object) -> None:

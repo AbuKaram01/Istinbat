@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Collection
+from pathlib import Path
 
 from istinbat.core import AskResult, AskStatus, IndexReport, Settings, Source, Stage, StageEvent
+from istinbat.core.downloads import DownloadCancelled, DownloadProgress
 from istinbat.core.history import ChatHistory
 from istinbat.core.progress import Progress, ProgressKey
 
@@ -73,6 +76,7 @@ class FakeEngine:
         self.asked: list[tuple[str, Collection[str] | None]] = []
         self.index_runs = 0
         self.rebuilds = 0
+        self.loads = 0                  # How many times the engine factory ran (the models were loaded).
 
     def books(self) -> list[str]:
         return sorted(SAMPLE_BOOKS)
@@ -117,6 +121,30 @@ class FakeEngine:
     def rebuild_index(self, progress=None, cancel=None) -> IndexReport:
         self.rebuilds += 1
         return self.index_library(progress, cancel)
+
+
+class FakeDownloader:
+    """Pretends to download: reports some progress, then waits to be released, failed or cancelled."""
+
+    def __init__(self):
+        self.calls = []
+        self.release = threading.Event()
+        self.failure = None
+
+    def __call__(self, option, models_dir, *, progress, cancel):
+        self.calls.append((option.key, models_dir))
+        progress(DownloadProgress(option.approx_bytes // 4, option.approx_bytes, option.files[0].path))
+        while not self.release.is_set():
+            if cancel():
+                raise DownloadCancelled
+            time.sleep(0.005)
+        if self.failure:
+            raise self.failure
+        for file in option.files:
+            target = Path(models_dir) / option.directory / file.path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x")
+        return option.local_path(models_dir)
 
 
 def write_sample_library(settings: Settings) -> None:

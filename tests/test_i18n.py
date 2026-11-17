@@ -66,7 +66,7 @@ def test_every_key_the_interface_uses_exists_in_both_catalogs():
 
     english, arabic = load_catalog(Language.EN), load_catalog(Language.AR)
     pattern = re.compile(
-        r'"((?:chat|sidebar|library|prefs|scope|menu|language|loading|error|notify|close|about|dialog|time|duration)'
+        r'"((?:chat|sidebar|library|prefs|scope|menu|language|loading|error|notify|close|about|dialog|time|duration|welcome)'
         r'\.[a-z0-9_.]+)"'
     )
     used = set()

@@ -80,3 +80,31 @@ def test_answer_language_defaults_to_following_the_question_and_round_trips(tmp_
     save_settings(settings, path)
     assert load_settings(path).memory.answer_language is AnswerLanguage.ENGLISH
     assert '"answer_language": "en"' in path.read_text(encoding="utf-8")
+
+
+def test_the_models_are_ready_only_when_all_three_exist_on_disk(tmp_path):
+    settings = Settings()
+    assert not settings.paths.models_ready()                       # Nothing chosen yet.
+
+    files = {name: tmp_path / name for name in ("embedder", "reranker", "llm.gguf")}
+    for path in files.values():
+        path.write_bytes(b"x")
+    settings.paths.embedder_model = str(files["embedder"])
+    settings.paths.reranker_model = str(files["reranker"])
+    assert not settings.paths.models_ready()                       # The language model is still missing.
+
+    settings.paths.llm_model = str(files["llm.gguf"])
+    assert settings.paths.models_ready()
+
+    files["reranker"].unlink()
+    assert not settings.paths.models_ready()                       # Chosen, but the file has gone.
+
+
+def test_the_welcome_guide_starts_unseen_and_the_flag_is_saved(tmp_path):
+    path = tmp_path / "settings.json"
+    settings = Settings()
+    assert settings.app.welcome_done is False
+
+    settings.app.welcome_done = True
+    save_settings(settings, path)
+    assert load_settings(path).app.welcome_done is True

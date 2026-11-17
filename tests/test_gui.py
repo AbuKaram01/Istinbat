@@ -27,7 +27,7 @@ if not Gtk.init_check():
     pytest.skip("no display available", allow_module_level=True)
 
 from gui_fakes import SAMPLE_BOOKS
-from gui_support import build_app, pump, start
+from gui_support import build_app, buttons, pump, start
 
 from istinbat.core import Language
 
@@ -51,24 +51,107 @@ def make_app(tmp_path):
 
 
 def ask(window, question):
+    """Send a question and wait until the answer is complete, including any model loading it triggered."""
     window._chat._entry.set_text(question)
     window._chat._on_send_clicked()
-    pump(5, until=lambda: not window.is_busy)
+    pump(5, until=lambda: not window.is_busy and not window.services.loading)
     pump(0.1)
 
 
-def test_engine_loads_and_the_question_entry_becomes_usable(make_app):
-    app, services, _ = make_app()
-    window = start(app, services)
-    assert services.engine is not None and window._chat._entry.get_sensitive()
+def test_opening_the_window_loads_no_model(make_app):
+    app, services, engine = make_app()
+    window = start(app, services, load=False)
+    pump(0.5)
+
+    assert engine.loads == 0 and services.engine is None and not services.loading
+    assert window._stack.get_visible_child_name() == "main"
+    assert window._chat._entry.get_sensitive()
 
 
-def test_a_failed_model_load_shows_the_error_page_and_keeps_input_disabled(make_app):
-    app, services, _ = make_app(fail_load=True)
-    window = start(app, services)
-    assert services.load_error is not None
-    assert window._stack.get_visible_child_name() == "error"
-    assert not window._chat._entry.get_sensitive()
+def test_the_first_question_loads_the_models_once_and_a_second_one_reuses_them(make_app):
+    app, services, engine = make_app()
+    window = start(app, services, load=False)
+
+    ask(window, "السؤال الأول")
+    assert engine.loads == 1 and len(engine.asked) == 1 and services.store.stats().turns == 1
+    assert window._stack.get_visible_child_name() == "main" and window._chat._entry.get_text() == ""
+
+    ask(window, "السؤال الثاني")
+    assert engine.loads == 1 and len(engine.asked) == 2
+
+
+def test_the_loading_page_shows_while_the_models_load_for_a_question(make_app):
+    app, services, engine = make_app(load_delay=0.4)
+    window = start(app, services, load=False)
+    window._chat._entry.set_text("سؤال")
+    window._chat._on_send_clicked()
+    pump(0.1)
+
+    assert window._stack.get_visible_child_name() == "loading"
+    pump(5, until=lambda: engine.asked and not window.is_busy)
+    assert window._stack.get_visible_child_name() == "main"
+
+
+def test_a_failed_model_load_shows_the_error_page_and_going_back_keeps_the_question(make_app):
+    app, services, engine = make_app(fail_load=True)
+    window = start(app, services, load=False)
+    window._chat._entry.set_text("سؤال")
+    window._chat._on_send_clicked()
+    pump(5, until=lambda: services.load_error is not None)
+    pump(0.2)
+
+    assert window._stack.get_visible_child_name() == "error" and engine.asked == []
+    back = [button for button in buttons(window._error) if button.get_label() == window._t("error.back")]
+    assert len(back) == 1
+    back[0].emit("clicked")
+
+    assert window._stack.get_visible_child_name() == "main"
+    assert services.engine is None and services.load_error is None
+    assert window._chat._entry.get_text() == "سؤال" and window._chat._entry.get_sensitive()
+
+
+def test_asking_again_after_a_failed_load_tries_to_load_again(make_app):
+    app, services, engine = make_app(fail_load=True)
+    window = start(app, services, load=False)
+    for expected_loads in (1, 2):
+        window._chat._entry.set_text("سؤال")
+        window._chat._on_send_clicked()
+        pump(5, until=lambda: services.load_error is not None)
+        assert engine.loads == expected_loads
+        window.leave_error()
+
+
+def test_a_new_conversation_and_the_scope_list_need_no_loaded_models(make_app):
+    app, services, engine = make_app()
+    window = start(app, services, load=False)
+
+    assert sorted(window._chat.scope_button._checks) == sorted(SAMPLE_BOOKS)    # Read from the index manifest.
+    app.activate_action("new-conversation", None)
+    pump(0.2)
+    assert window.current_conversation_id is None and services.engine is None and engine.loads == 0
+
+
+def test_indexing_from_the_library_loads_the_models_first(make_app):
+    app, services, engine = make_app()
+    window = start(app, services, load=False)
+    window.open_library()
+    pump(0.3)
+    window._library._index_button.emit("clicked")
+    pump(5, until=lambda: engine.index_runs == 1 and not window.is_busy)
+
+    assert engine.loads == 1 and engine.index_runs == 1 and services.engine is engine
+
+
+def test_a_failed_load_while_indexing_shows_the_error_page_and_indexes_nothing(make_app):
+    app, services, engine = make_app(fail_load=True)
+    window = start(app, services, load=False)
+    window.open_library()
+    pump(0.3)
+    window._library._index_button.emit("clicked")
+    pump(5, until=lambda: services.load_error is not None)
+    pump(0.2)
+
+    assert window._stack.get_visible_child_name() == "error" and engine.index_runs == 0 and not window.is_busy
 
 
 def test_asking_creates_a_titled_conversation_and_stores_the_turn(make_app):

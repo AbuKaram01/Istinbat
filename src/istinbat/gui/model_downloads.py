@@ -120,15 +120,30 @@ class ModelRow(Adw.ActionRow):
 
 
 class ModelDownloadGroup(Adw.PreferencesGroup):
+    """The model rows, in a menu that expands (Preferences) or laid out flat (the welcome guide).
+
+    Args:
+        parent: The dialog that hosts the group; it shows the confirmation and the busy toast (``add_toast``).
+        services: The shared application state.
+        folder_row: The row that chooses the download folder, shown first in the menu; None for none.
+        on_model_selected: Called when a model has been selected, after a download or "Use".
+        flat: Put the rows directly in the group, with no title and no menu around them.
+    """
+
     def __init__(
         self,
         parent: Gtk.Widget,
         services: AppServices,
-        folder_row: Adw.PreferencesRow,
+        folder_row: Adw.PreferencesRow | None,
         on_model_selected: Callable[[], None],
+        *,
+        flat: bool = False,
     ) -> None:
         self._t = services.translate
-        super().__init__(title=self._t("prefs.models.title"), description=self._t("prefs.models.description"))
+        if flat:
+            super().__init__()
+        else:
+            super().__init__(title=self._t("prefs.models.title"), description=self._t("prefs.models.description"))
         self._parent = parent
         self._services = services
         self._on_model_selected = on_model_selected
@@ -136,15 +151,21 @@ class ModelDownloadGroup(Adw.PreferencesGroup):
         self._options: dict[str, ModelOption] = {}
         self._nested: list[Adw.ExpanderRow] = []      # The language-model expanders, opened by ``expand(True)``.
 
-        self.expander = Adw.ExpanderRow(
-            title=self._t("prefs.models.available.title"), subtitle=self._t("prefs.models.available.subtitle"),
-            icon_name="folder-download-symbolic",
-        )
-        self.add(self.expander)
-        self.expander.add_row(folder_row)
-        self.expander.add_row(self._row(EMBEDDER))
-        self.expander.add_row(self._row(RERANKER))
-        self.expander.add_row(self._language_models())
+        self.expander: Adw.ExpanderRow | None = None
+        if flat:
+            add = self.add
+        else:
+            self.expander = Adw.ExpanderRow(
+                title=self._t("prefs.models.available.title"), subtitle=self._t("prefs.models.available.subtitle"),
+                icon_name="folder-download-symbolic",
+            )
+            self.add(self.expander)
+            add = self.expander.add_row
+        if folder_row is not None:
+            add(folder_row)
+        add(self._row(EMBEDDER))
+        add(self._row(RERANKER))
+        add(self._language_models())
 
         self.refresh()
         services.downloads.subscribe(self._on_event)
@@ -207,10 +228,15 @@ class ModelDownloadGroup(Adw.PreferencesGroup):
 
     def expand(self, everything: bool = False) -> None:
         """Open the menu; with ``everything`` also the language-model lists inside it."""
-        self.expander.set_expanded(True)
+        if self.expander is not None:
+            self.expander.set_expanded(True)
         if everything:
             for expander in self._nested:
                 expander.set_expanded(True)
+
+    def expand_language_models(self) -> None:
+        """Open the language-model list (not the families inside it), so that the choices show without a click."""
+        self._nested[0].set_expanded(True)
 
     def detach(self) -> None:
         """Stop listening; called when the dialog closes."""

@@ -59,6 +59,11 @@ class PathsConfig:
     conversations_db: str = field(default_factory=lambda: str(data_dir() / "conversations.db"))
     collection_name: str = "books_collection"
 
+    def models_ready(self) -> bool:
+        """Return whether the three models are chosen and present on disk."""
+        chosen = (self.embedder_model, self.reranker_model, self.llm_model)
+        return all(path and os.path.exists(path) for path in chosen)
+
 
 @dataclass
 class IndexingConfig:
@@ -106,6 +111,7 @@ class AppConfig:
     language: Language = Language.EN
     notify_on_answer: bool = True
     auto_delete_days: int = 0   # Delete conversations idle for this many days; 0 disables.
+    welcome_done: bool = False  # The first-run welcome guide has been shown (or was not needed).
 
 
 @dataclass
