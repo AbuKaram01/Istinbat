@@ -5,7 +5,7 @@
 
 from .engine import AskResult, AskStatus, Engine, Source
 from .history import ChatHistory
-from .indexer import BookInfo, BookStatus, IndexReport, index_library, rebuild_library, scan_library
+from .indexer import BookInfo, BookStatus, IndexReport, index_library, rebuild_library, remove_book, scan_library
 from .language import ContentLanguage, detect_language, resolve_answer_language
 from .progress import Progress, ProgressKey, Stage, StageEvent
 from .settings import (
@@ -28,5 +28,5 @@ __all__ = [
     "ContentLanguage", "Engine", "IndexReport", "IndexingConfig", "Language", "LlmConfig", "MemoryConfig",
     "PathsConfig", "Progress", "ProgressKey", "RetrievalConfig", "RewriteMode", "Settings", "Source",
     "Stage", "StageEvent", "detect_language", "index_library", "load_settings", "rebuild_library",
-    "resolve_answer_language", "save_settings", "scan_library",
+    "remove_book", "resolve_answer_language", "save_settings", "scan_library",
 ]

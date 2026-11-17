@@ -77,6 +77,8 @@ class FakeEngine:
         self.index_runs = 0
         self.rebuilds = 0
         self.loads = 0                  # How many times the engine factory ran (the models were loaded).
+        self.removed: list[str] = []    # Paths of the books taken out of the index.
+        self.remove_delay = 0.0
 
     def books(self) -> list[str]:
         return sorted(SAMPLE_BOOKS)
@@ -121,6 +123,11 @@ class FakeEngine:
     def rebuild_index(self, progress=None, cancel=None) -> IndexReport:
         self.rebuilds += 1
         return self.index_library(progress, cancel)
+
+    def remove_book(self, path: str) -> bool:
+        time.sleep(self.remove_delay)
+        self.removed.append(path)
+        return True
 
 
 class FakeDownloader:

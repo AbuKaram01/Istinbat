@@ -28,6 +28,8 @@ from .widgets import confirm, window_buttons
 _DEFAULT_SIZE = (1000, 640)
 _MINIMUM_SIZE = (360, 480)
 _COLLAPSE_CONDITION = "max-width: 640sp"
+# Background jobs on the library; the question box is locked while one runs.
+_LIBRARY_JOBS = ("indexing", "deleting")
 _PAGE_LOADING, _PAGE_ERROR, _PAGE_MAIN = "loading", "error", "main"
 
 
@@ -222,10 +224,10 @@ class MainWindow(Adw.ApplicationWindow):
         return self._busy is not None
 
     def set_busy(self, kind: str | None) -> None:
-        """Record what is running (``"asking"``, ``"indexing"`` or None) and lock conflicting controls."""
+        """Record what is running (``"asking"``, ``"indexing"``, ``"deleting"`` or None); lock conflicting controls."""
         self._busy = kind
         self._sidebar.set_sensitive(kind != "asking")
-        self._chat.set_input_enabled(kind != "indexing")
+        self._chat.set_input_enabled(kind not in _LIBRARY_JOBS)
         self._library.set_actions_enabled(kind is None)
 
     def show_toast(self, message: str) -> None:

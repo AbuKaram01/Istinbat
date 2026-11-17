@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..core.catalog import ModelOption
 from ..core.engine import Engine
-from ..core.indexer import indexed_book_names
+from ..core.indexer import indexed_book_names, remove_book
 from ..core.progress import ProgressCallback
 from ..core.settings import Language, Settings, load_settings, save_settings
 from ..i18n import Translator
@@ -94,6 +94,16 @@ class AppServices:
     def indexed_books(self) -> list[str]:
         """Names of the indexed books, known without loading the engine."""
         return indexed_book_names(self.settings)
+
+    def remove_book(self, path: str) -> bool:
+        """Take a book out of the index; False if it was not indexed.
+
+        With the engine loaded the search index follows at once. Without it the vector store is opened on its own,
+        which needs no model, and the engine builds its search index from the store when it loads.
+        """
+        if self.engine is not None:
+            return self.engine.remove_book(path)
+        return remove_book(self.settings, path)
 
     def set_language(self, language: Language) -> None:
         self.settings.app.language = language

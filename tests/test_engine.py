@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: 2026 AbuKaram01
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
+import os
+
 from conftest import BOOK_A, FakeCollection, FakeEmbedder, FakeLLM, FakeReranker
 
 from istinbat.core import AnswerLanguage, AskStatus, ChatHistory, ContentLanguage, Engine, Stage, StageEvent
@@ -111,6 +113,28 @@ def test_rebuild_index_reindexes_and_refreshes(settings, write_book):
 
     report = engine.rebuild_index()
     assert report.new_books == 1 and len(collection.rows) == chunk_count and not retriever.is_empty
+
+
+def test_removing_a_book_refreshes_the_search_index(indexed_engine, settings):
+    path = os.path.join(settings.paths.books_dir, "computer-book.txt")
+
+    assert indexed_engine.remove_book(path) is True
+
+    assert indexed_engine.books() == ["information-book"]
+    result = indexed_engine.ask("ما هو الحاسوب؟")
+    assert {source.book for source in result.sources} == {"information-book"}
+
+
+def test_removing_the_last_book_leaves_an_empty_index_that_says_so(indexed_engine, settings):
+    for name in ("computer-book", "information-book"):
+        indexed_engine.remove_book(os.path.join(settings.paths.books_dir, f"{name}.txt"))
+
+    assert indexed_engine.books() == [] and indexed_engine.ask("سؤال").status is AskStatus.NO_BOOKS
+
+
+def test_removing_a_book_that_is_not_indexed_leaves_the_search_index_alone(indexed_engine, settings):
+    assert indexed_engine.remove_book(os.path.join(settings.paths.books_dir, "other.txt")) is False
+    assert indexed_engine.books() == ["computer-book", "information-book"]
 
 
 # -- Answer language ----------------------------------------------------------

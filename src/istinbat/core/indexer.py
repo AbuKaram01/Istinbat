@@ -146,6 +146,31 @@ def indexed_book_names(settings: Settings) -> list[str]:
     return sorted({book_name(path) for path in manifest.known_paths()})
 
 
+def remove_book(settings: Settings, path: str, *, collection: Any | None = None) -> bool:
+    """Take one book out of the index: its passages leave the vector store and its manifest entry is forgotten.
+
+    The book's file is not touched. Passages are stored under the book's name, so another indexed book with the
+    same name (in a different folder) shares them: it is forgotten too, and the next indexing run indexes it again.
+
+    Args:
+        path: The book's file path, as the manifest records it.
+        collection: The engine's open collection, to avoid opening the store a second time.
+
+    Returns:
+        False, with nothing changed, if the book was not indexed.
+    """
+    manifest = Manifest.load(settings.paths.manifest_file)
+    if manifest.digest_of(path) is None:
+        return False
+    name = book_name(path)
+    delete_book_chunks(open_collection(settings) if collection is None else collection, name)
+    for known in manifest.known_paths():
+        if book_name(known) == name:
+            manifest.forget(known)
+    manifest.save()
+    return True
+
+
 def _require_books_dir(settings: Settings) -> None:
     if not os.path.isdir(settings.paths.books_dir):
         raise FileNotFoundError(f"Books folder not found: {settings.paths.books_dir}")

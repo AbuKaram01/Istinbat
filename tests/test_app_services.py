@@ -3,7 +3,10 @@
 
 """The state the first-run guide and the lazy model loading rely on, without any interface."""
 
+from types import SimpleNamespace
+
 import pytest
+from conftest import FakeCollection
 
 from istinbat.core.manifest import Manifest
 from istinbat.core.settings import Settings, load_settings
@@ -73,3 +76,26 @@ def test_clearing_a_load_error_lets_the_next_use_try_again(services):
     services.clear_load_error()
 
     assert services.load_error is None
+
+
+def test_removing_a_book_without_the_engine_opens_the_vector_store_on_its_own(services, tmp_path, monkeypatch):
+    collection = FakeCollection()
+    collection.upsert(["1", "2"], [[0], [0]], ["x", "y"], [{"source": "Alpha"}, {"source": "Beta"}])
+    monkeypatch.setattr("istinbat.core.indexer.open_collection", lambda _settings: collection)
+    manifest = Manifest(services.settings.paths.manifest_file)
+    manifest.record(str(tmp_path / "Alpha.txt"), "x")
+    manifest.record(str(tmp_path / "Beta.txt"), "y")
+    manifest.save()
+
+    assert services.remove_book(str(tmp_path / "Alpha.txt")) is True
+
+    assert [meta["source"] for _, meta in collection.rows.values()] == ["Beta"]
+    assert services.indexed_books() == ["Beta"] and services.engine is None
+
+
+def test_removing_a_book_goes_through_the_loaded_engine_so_its_search_index_follows(services):
+    removed = []
+    services.engine = SimpleNamespace(remove_book=lambda path: removed.append(path) or True)
+
+    assert services.remove_book("/books/Alpha.txt") is True
+    assert removed == ["/books/Alpha.txt"]

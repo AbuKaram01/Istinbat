@@ -18,7 +18,7 @@ from gi.repository import Adw, Gio, GLib, Gtk
 from ..core.indexer import BookInfo, BookStatus, IndexReport, scan_library
 from ..core.progress import Progress
 from ..services import Task
-from .widgets import apply_text_direction
+from .widgets import apply_text_direction, confirm
 
 if TYPE_CHECKING:
     from .window import MainWindow
@@ -31,6 +31,34 @@ _STATUS_STYLE = {
 }
 
 
+def _isolated(text: str) -> str:
+    """Wrap ``text`` in isolates, so a book name in the other script cannot reorder the sentence around it."""
+    return f"\u2068{text}\u2069"
+
+
+def _can_trash(path: str) -> bool:
+    """Return whether the system can move ``path`` to the Trash (it cannot on some drives and in some sessions)."""
+    attribute = Gio.FILE_ATTRIBUTE_ACCESS_CAN_TRASH
+    try:
+        info = Gio.File.new_for_path(path).query_info(attribute, Gio.FileQueryInfoFlags.NONE, None)
+    except GLib.Error:
+        return False
+    return info.get_attribute_boolean(attribute)
+
+
+def _discard_file(path: str, trash: bool) -> None:
+    """Move a book's file to the Trash, or delete it for good when ``trash`` is False.
+
+    A file that is already gone counts as discarded.
+    """
+    file = Gio.File.new_for_path(path)
+    try:
+        file.trash(None) if trash else file.delete(None)
+    except GLib.Error as error:
+        if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_FOUND):
+            raise
+
+
 class LibraryPage(Adw.NavigationPage):
     def __init__(self, window: MainWindow) -> None:
         self._t = window.services.translate
@@ -38,6 +66,8 @@ class LibraryPage(Adw.NavigationPage):
         self._window = window
         self._services = window.services
         self._task: Task | None = None
+        self._delete_buttons: list[Gtk.Button] = []
+        self._actions_enabled = True
 
         self._add_button = Gtk.Button(label=self._t("library.add"))
         self._add_button.connect("clicked", self._on_add_clicked)
@@ -102,6 +132,7 @@ class LibraryPage(Adw.NavigationPage):
     def _show_books(self, books: list[BookInfo]) -> None:
         while (row := self._list.get_first_child()) is not None:
             self._list.remove(row)
+        self._delete_buttons.clear()
         for book in books:
             self._list.append(self._build_row(book))
         self._stack.set_visible_child_name("books" if books else "empty")
@@ -114,12 +145,27 @@ class LibraryPage(Adw.NavigationPage):
         badge.add_css_class("status-badge")
         badge.add_css_class(_STATUS_STYLE[book.status])
         row.add_suffix(badge)
+        row.add_suffix(self._build_delete_button(book, row))
         return row
 
+    def _build_delete_button(self, book: BookInfo, row: Adw.ActionRow) -> Gtk.Button:
+        label = self._t("library.delete.tooltip", name=_isolated(book.name))
+        button = Gtk.Button(
+            icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER, tooltip_text=label,
+            css_classes=["flat", "circular"], sensitive=self._actions_enabled,
+        )
+        button.update_property([Gtk.AccessibleProperty.LABEL], [label])
+        button.connect("clicked", lambda _button: self._confirm_deletion(book, row))
+        self._delete_buttons.append(button)
+        return button
+
     def set_actions_enabled(self, enabled: bool) -> None:
-        """Disable indexing while another job (such as answering a question) is running."""
+        """Disable indexing and deleting while another job (such as answering a question) is running."""
+        self._actions_enabled = enabled
         self._add_button.set_sensitive(enabled)
         self._index_button.set_sensitive(enabled)
+        for button in self._delete_buttons:
+            button.set_sensitive(enabled)
 
     # -- Adding books -------------------------------------------------------------
 
@@ -145,6 +191,55 @@ class LibraryPage(Adw.NavigationPage):
                 shutil.copy2(path, os.path.join(folder, os.path.basename(path)))
                 copied += 1
         self._window.show_toast(self._t("library.added", count=copied))
+        self.refresh()
+
+    # -- Deleting books -----------------------------------------------------------
+
+    def _confirm_deletion(self, book: BookInfo, row: Adw.ActionRow) -> None:
+        if self._window.is_busy:
+            return
+        trash = _can_trash(book.path)
+        confirm(
+            self._window,
+            heading=self._t("library.delete.heading", name=_isolated(book.name)),
+            body=self._t("library.delete.body.trash" if trash else "library.delete.body.delete"),
+            confirm_label=self._t("library.delete.confirm"),
+            cancel_label=self._t("dialog.cancel"),
+            on_confirm=lambda: self._delete(book, row, trash),
+        )
+
+    def _delete(self, book: BookInfo, row: Adw.ActionRow, trash: bool) -> None:
+        """Discard the book's file, then take it out of the index.
+
+        The file goes first: if the second step is interrupted, the book is already missing from the folder and the
+        next indexing run removes it from the index by itself.
+        """
+        if self._window.is_busy:
+            return
+        self._window.set_busy("deleting")
+        row.set_sensitive(False)
+
+        def job(_task: Task) -> None:
+            _discard_file(book.path, trash)
+            self._services.remove_book(book.path)
+
+        self._services.worker.submit(
+            job,
+            on_done=lambda _result: self._on_deleted(book),
+            on_error=lambda error: self._on_delete_failed(book, error),
+        )
+
+    def _on_deleted(self, book: BookInfo) -> None:
+        self._window.set_busy(None)
+        self._window.show_toast(self._t("library.deleted", name=_isolated(book.name)))
+        self._window.on_library_changed()
+        self.refresh()
+
+    def _on_delete_failed(self, book: BookInfo, error: Exception) -> None:
+        self._window.set_busy(None)
+        message = getattr(error, "message", None) or str(error)
+        self._window.show_toast(self._t("library.delete_failed", name=_isolated(book.name), message=message))
+        self._window.on_library_changed()      # The index may have changed before the failure.
         self.refresh()
 
     # -- Indexing -----------------------------------------------------------------

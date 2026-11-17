@@ -21,7 +21,7 @@ from typing import Any
 
 from .generation import Generation, generate_answer
 from .history import ChatHistory
-from .indexer import IndexReport, index_library, rebuild_library
+from .indexer import IndexReport, index_library, rebuild_library, remove_book
 from .language import ContentLanguage, resolve_answer_language
 from .models import load_embedder, load_llm, load_reranker, open_collection
 from .progress import (
@@ -159,6 +159,13 @@ class Engine:
         )
         self.retriever.refresh()
         return report
+
+    def remove_book(self, path: str) -> bool:
+        """Take one book out of the index, then refresh the search index; False if it was not indexed."""
+        removed = remove_book(self.settings, path, collection=self.retriever.collection)
+        if removed:
+            self.retriever.refresh()
+        return removed
 
     def books(self) -> list[str]:
         """Names of the indexed books, for the search-scope picker."""

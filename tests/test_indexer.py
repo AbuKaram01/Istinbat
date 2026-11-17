@@ -6,7 +6,8 @@ import os
 import pytest
 from conftest import BOOK_A, BOOK_B, FakeCollection, FakeEmbedder
 
-from istinbat.core import BookStatus, ProgressKey, index_library, rebuild_library, scan_library
+from istinbat.core import BookStatus, ProgressKey, index_library, rebuild_library, remove_book, scan_library
+from istinbat.core.indexer import indexed_book_names
 from istinbat.core.manifest import Manifest
 
 
@@ -133,3 +134,92 @@ def test_rebuild_wipes_orphans_and_reindexes_everything(settings, write_book):
     assert set(collection.rows) == original_ids
     assert report.new_books == 2 and len(embedder.calls) > original_calls
     assert {book.status for book in scan_library(settings)} == {BookStatus.INDEXED}
+
+
+# -- Removing a book ----------------------------------------------------------
+
+def test_removing_a_book_drops_its_passages_and_manifest_entry_but_keeps_the_others(settings, write_book):
+    path = write_book("a", BOOK_A)
+    other = write_book("b", BOOK_B)
+    collection, embedder = FakeCollection(), FakeEmbedder()
+    run(settings, collection=collection, embedder=embedder)
+
+    assert remove_book(settings, path, collection=collection) is True
+
+    assert {meta["source"] for _, meta in collection.rows.values()} == {"b"}
+    manifest = Manifest.load(settings.paths.manifest_file)
+    assert manifest.digest_of(path) is None and manifest.digest_of(other)
+    assert indexed_book_names(settings) == ["b"]
+
+
+def test_removing_a_book_leaves_its_file_which_then_shows_as_new_and_can_be_indexed_again(settings, write_book):
+    path = write_book("a", BOOK_A)
+    collection, embedder = FakeCollection(), FakeEmbedder()
+    run(settings, collection=collection, embedder=embedder)
+    remove_book(settings, path, collection=collection)
+
+    assert os.path.exists(path)
+    assert {book.name: book.status for book in scan_library(settings)} == {"a": BookStatus.NEW}
+    report, _, _ = run(settings, collection=collection, embedder=embedder)
+    assert report.new_books == 1 and collection.count() > 0
+
+
+def test_after_the_file_is_deleted_too_the_next_indexing_run_has_nothing_left_to_do(settings, write_book):
+    path = write_book("a", BOOK_A)
+    write_book("b", BOOK_B)
+    collection, embedder = FakeCollection(), FakeEmbedder()
+    run(settings, collection=collection, embedder=embedder)
+
+    remove_book(settings, path, collection=collection)
+    os.remove(path)
+    report, _, _ = run(settings, collection=collection, embedder=embedder)
+
+    assert report.nothing_to_do and report.removed_books == 0
+
+
+def test_removing_a_book_that_is_not_indexed_changes_nothing(settings, write_book):
+    write_book("a", BOOK_A)
+    write_book("b", BOOK_B)
+    collection = FakeCollection()
+    index_library(settings, embedder=FakeEmbedder(), collection=collection)
+    added_later = write_book("c", BOOK_B)
+    before = dict(collection.rows)
+
+    assert remove_book(settings, added_later, collection=collection) is False
+    assert collection.rows == before and len(Manifest.load(settings.paths.manifest_file)) == 2
+
+
+def test_removing_a_book_forgets_a_namesake_in_another_folder_so_it_is_indexed_again(settings, write_book):
+    first = write_book("a", BOOK_A)
+    second = os.path.join(settings.paths.books_dir, "sub", "a.txt")
+    os.makedirs(os.path.dirname(second))
+    with open(second, "w", encoding="utf-8") as handle:
+        handle.write(BOOK_B)
+    collection, embedder = FakeCollection(), FakeEmbedder()
+    run(settings, collection=collection, embedder=embedder)
+
+    remove_book(settings, first, collection=collection)
+
+    assert collection.count() == 0                                  # The passages are stored under the shared name.
+    assert len(Manifest.load(settings.paths.manifest_file)) == 0
+    report, _, _ = run(settings, collection=collection, embedder=embedder)
+    assert report.new_books == 2
+
+
+def test_removing_a_book_does_not_touch_a_namesake_when_the_book_itself_was_not_indexed(settings, write_book):
+    indexed = write_book("a", BOOK_A)
+    collection = FakeCollection()
+    index_library(settings, embedder=FakeEmbedder(), collection=collection)
+    unindexed = os.path.join(settings.paths.books_dir, "sub", "a.txt")
+
+    assert remove_book(settings, unindexed, collection=collection) is False
+    assert collection.count() > 0 and Manifest.load(settings.paths.manifest_file).digest_of(indexed)
+
+
+def test_removing_a_book_without_a_given_collection_opens_the_store_itself(settings, write_book, monkeypatch):
+    path = write_book("a", BOOK_A)
+    collection = FakeCollection()
+    index_library(settings, embedder=FakeEmbedder(), collection=collection)
+    monkeypatch.setattr("istinbat.core.indexer.open_collection", lambda _settings: collection)
+
+    assert remove_book(settings, path) is True and collection.count() == 0
