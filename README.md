@@ -74,6 +74,14 @@ or **Index** on the Library page), with a progress page while they do. If they c
 explains why, offers **Download Models…** and **Open Preferences**, and **Back** returns to the conversation.
 Then set your books folder, add `.txt` books on the **Library** page and press **Index**.
 
+### Books
+
+Istinbat reads plain-text `.txt` books. It does not extract text from PDFs or scanned books: convert those first
+with [KaramTC](https://github.com/AbuKaram01/KaramTC), which reads a PDF's text layer directly, runs OCR on scanned
+pages, and saves the result as a `.txt` file to add to the Library. To take a book out again, press the trash button
+on its row: the file goes to the Trash (or is deleted for good where the system has none) and its text leaves the
+index.
+
 ### Downloading models
 
 | Model | Source | Download |
