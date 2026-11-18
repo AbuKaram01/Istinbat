@@ -8,6 +8,7 @@ Run headless with:  GSK_RENDERER=cairo xvfb-run -a pytest tests/test_gui.py
 """
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -351,6 +352,37 @@ def test_the_library_lists_the_books_with_their_status(make_app):
         row = row.get_next_sibling()
     assert len(rows) == len(SAMPLE_BOOKS)
     assert window._navigation.get_visible_page().get_tag() == "library"
+
+
+def test_an_empty_library_points_to_karamtc_for_pdfs_and_scanned_books(make_app):
+    app, services, _ = make_app()
+    for book in Path(services.settings.paths.books_dir).glob("*.txt"):
+        book.unlink()
+    window = start(app, services, load=False)
+    window.open_library()
+    pump(2, until=lambda: window._library._stack.get_visible_child_name() == "empty")
+
+    page = window._library._empty
+    assert "plain-text (.txt)" in page.get_description() and "Convert it to text with KaramTC" in page.get_description()
+    links = [button for button in buttons(page) if isinstance(button, Gtk.LinkButton)]
+    assert [(link.get_label(), link.get_uri()) for link in links] == [
+        ("Get KaramTC", "https://github.com/AbuKaram01/KaramTC"),
+    ]
+
+
+def test_the_karamtc_hint_is_translated_into_arabic(make_app):
+    app, services, _ = make_app()
+    services.set_language(Language.AR)
+    for book in Path(services.settings.paths.books_dir).glob("*.txt"):
+        book.unlink()
+    window = start(app, services, load=False)
+    window.open_library()
+    pump(2, until=lambda: window._library._stack.get_visible_child_name() == "empty")
+
+    page = window._library._empty
+    assert "KaramTC" in page.get_description() and "PDF" in page.get_description()
+    labels = [button.get_label() for button in buttons(page) if isinstance(button, Gtk.LinkButton)]
+    assert labels == ["الحصول على KaramTC"]
 
 
 def test_indexing_runs_the_engine_and_reports_back(make_app):

@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from .window import MainWindow
 
 _MAX_CONTENT_WIDTH = 720
+# Istinbat reads plain text only; this companion app turns PDFs and scanned books into it.
+_CONVERTER_URL = "https://github.com/AbuKaram01/KaramTC"
 _STATUS_STYLE = {
     BookStatus.INDEXED: "success",
     BookStatus.NEW: "accent",
@@ -95,6 +97,9 @@ class LibraryPage(Adw.NavigationPage):
             icon_name="accessories-dictionary-symbolic",
             title=self._t("library.empty.title"),
             description=self._t("library.empty.description"),
+            child=Gtk.LinkButton(
+                uri=_CONVERTER_URL, label=self._t("library.empty.converter"), halign=Gtk.Align.CENTER,
+            ),
         )
         self._stack = Gtk.Stack()
         self._stack.add_named(self._list, "books")

@@ -13,7 +13,7 @@ gi = pytest.importorskip("gi")
 try:
     gi.require_version("Gtk", "4.0")
     gi.require_version("Adw", "1")
-    from gi.repository import Gtk
+    from gi.repository import Adw, Gtk
 except (ValueError, ImportError):
     pytest.skip("GTK 4 / libadwaita are not installed", allow_module_level=True)
 
@@ -137,6 +137,23 @@ def test_the_guide_walks_through_three_pages_with_back_and_next(make_app):
     assert dialog._index == 2 and labels(dialog) == ("Close", True)
     dialog._back.emit("clicked")
     assert dialog._index == 1
+
+
+def test_the_library_row_of_the_welcome_page_says_that_karamtc_converts_pdfs(make_app):
+    app, services, _ = make_app()
+    dialog = guide_of(start(app, services, load=False))
+
+    subtitles = []
+    stack = [dialog._pages[0]]
+    while stack:
+        widget = stack.pop()
+        if isinstance(widget, Adw.ActionRow):
+            subtitles.append(widget.get_subtitle())
+        child = widget.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+    assert any("plain-text (.txt)" in text and "KaramTC" in text for text in subtitles)
 
 
 def test_the_models_page_lists_the_same_rows_as_preferences_without_a_menu_around_them(make_app):
