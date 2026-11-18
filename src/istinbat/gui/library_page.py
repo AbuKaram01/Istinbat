@@ -51,13 +51,16 @@ def _can_trash(path: str) -> bool:
 def _discard_file(path: str, trash: bool) -> None:
     """Move a book's file to the Trash, or delete it for good when ``trash`` is False.
 
-    A file that is already gone counts as discarded.
+    A file that is already gone counts as discarded. GLib does not report a missing file the same way everywhere
+    (Windows answers a plain failure when trashing it), so existence is checked instead of the error code.
     """
     file = Gio.File.new_for_path(path)
+    if not file.query_exists(None):
+        return
     try:
         file.trash(None) if trash else file.delete(None)
-    except GLib.Error as error:
-        if not error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.NOT_FOUND):
+    except GLib.Error:
+        if file.query_exists(None):      # Anything but a file that vanished meanwhile is a real failure.
             raise
 
 

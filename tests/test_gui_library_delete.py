@@ -291,10 +291,44 @@ def test_a_file_can_be_trashed_only_where_the_system_allows_it(tmp_path):
     assert library_page._can_trash("/nonexistent-folder/book.txt") is False
 
 
+def test_a_file_that_vanishes_while_it_is_being_discarded_is_not_an_error(monkeypatch):
+    class VanishingFile:
+        """Exists when asked first, then the trash fails the way Windows reports a missing file (no useful code)."""
+
+        def __init__(self):
+            self.exists = True
+
+        def query_exists(self, cancellable):
+            return self.exists
+
+        def trash(self, cancellable):
+            self.exists = False
+            raise library_page.GLib.Error.new_literal(library_page.Gio.io_error_quark(), "Unable to trash file", 0)
+
+    monkeypatch.setattr(library_page.Gio.File, "new_for_path", staticmethod(lambda _path: VanishingFile()))
+    library_page._discard_file("/books/a.txt", trash=True)
+
+
+def test_a_file_that_still_exists_after_a_failed_trash_is_reported(monkeypatch):
+    class StubbornFile:
+        def query_exists(self, cancellable):
+            return True
+
+        def trash(self, cancellable):
+            raise library_page.GLib.Error.new_literal(library_page.Gio.io_error_quark(), "Unable to trash file", 0)
+
+    monkeypatch.setattr(library_page.Gio.File, "new_for_path", staticmethod(lambda _path: StubbornFile()))
+    with pytest.raises(library_page.GLib.Error):
+        library_page._discard_file("/books/a.txt", trash=True)
+
+
 def test_the_trash_is_used_when_asked_for(tmp_path, monkeypatch):
     calls = []
 
     class FakeFile:
+        def query_exists(self, cancellable):
+            return True
+
         def trash(self, cancellable):
             calls.append("trash")
 
